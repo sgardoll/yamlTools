@@ -26,6 +26,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join('');
   }
 
+  // Helper to safely call setState only if widget is still mounted
+  void setStateIfMounted(VoidCallback fn) {
+    if (mounted) setState(fn);
+  }
+
   // Helper to convert YamlMap/YamlList to Dart Map/List
   dynamic _convertYamlNode(dynamic node) {
     if (node is YamlMap) {
@@ -164,6 +169,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _parsedYamlMap = null;
     });
 
+    // Declare decodedZipBytes at a higher scope level
+    List<int>? decodedZipBytes;
+
     try {
       final Uri uri = Uri.parse(
           'https://api.flutterflow.io/v2/projectYamls?projectId=$projectId');
@@ -175,14 +183,18 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       );
       final String? contentLengthHeader = response.headers['content-length'];
-print('DEBUG_LOG: API Response Header Content-Length: $contentLengthHeader');
-print('DEBUG_LOG: Actual response.bodyBytes.length: ${response.bodyBytes.length}');
-if (contentLengthHeader != null) {
-  final int? parsedContentLength = int.tryParse(contentLengthHeader);
-  if (parsedContentLength != null && parsedContentLength != response.bodyBytes.length) {
-    print('DEBUG_LOG: WARNING - Mismatch between Content-Length header ($parsedContentLength) and actual received bytes (${response.bodyBytes.length}). Possible JSON truncation.');
-  }
-}
+      print(
+          'DEBUG_LOG: API Response Header Content-Length: $contentLengthHeader');
+      print(
+          'DEBUG_LOG: Actual response.bodyBytes.length: ${response.bodyBytes.length}');
+      if (contentLengthHeader != null) {
+        final int? parsedContentLength = int.tryParse(contentLengthHeader);
+        if (parsedContentLength != null &&
+            parsedContentLength != response.bodyBytes.length) {
+          print(
+              'DEBUG_LOG: WARNING - Mismatch between Content-Length header ($parsedContentLength) and actual received bytes (${response.bodyBytes.length}). Possible JSON truncation.');
+        }
+      }
 
       if (response.statusCode == 200) {
         final String responseBody = response.body;
@@ -223,6 +235,14 @@ if (contentLengthHeader != null) {
                     'DEBUG_LOG: Extracted project_yaml_bytes string length: ${projectYamlBytesString.length}');
                 print(
                     'DEBUG_LOG: Extracted project_yaml_bytes string snippet (first 100 chars): ${projectYamlBytesString.substring(0, projectYamlBytesString.length > 100 ? 100 : projectYamlBytesString.length)}');
+                print(
+                    'DEBUG_LOG: project_yaml_bytes length is multiple of 4: ${projectYamlBytesString.length % 4 == 0}');
+                int paddingChars = 0;
+                if (projectYamlBytesString.endsWith('=='))
+                  paddingChars = 2;
+                else if (projectYamlBytesString.endsWith('=')) paddingChars = 1;
+                print(
+                    'DEBUG_LOG: project_yaml_bytes padding characters: $paddingChars');
               } else {
                 print(
                     'DEBUG_LOG: project_yaml_bytes key within "value" object is not a String or is null. Actual type: ${projectYamlBytesField?.runtimeType}');
@@ -267,7 +287,6 @@ if (contentLengthHeader != null) {
             }
 
             // 2. Extract and Decode Base64 String (using projectYamlBytesString)
-            List<int> decodedZipBytes;
             try {
               decodedZipBytes = base64Decode(
                   projectYamlBytesString); // Use the extracted and validated string
@@ -282,13 +301,13 @@ if (contentLengthHeader != null) {
             }
 
             print(
-                'DEBUG_LOG: Decoded ZIP Bytes Length: ${decodedZipBytes.length}');
-            List<int> snippet = decodedZipBytes.take(32).toList();
+                'DEBUG_LOG: Decoded ZIP Bytes Length: ${decodedZipBytes?.length}');
+            List<int> snippet = decodedZipBytes?.take(32).toList() ?? [];
             print(
                 'DEBUG_LOG: Decoded ZIP Bytes Snippet (Hex, first 32 bytes): ${_bytesToHexString(snippet)}');
 
             final archive =
-                ZipDecoder().decodeBytes(decodedZipBytes, verify: true);
+                ZipDecoder().decodeBytes(decodedZipBytes!, verify: true);
 
             ArchiveFile? yamlFile;
             for (final file in archive.files) {
@@ -336,19 +355,33 @@ if (contentLengthHeader != null) {
             return;
           }
         } on ArchiveException catch (e) {
-          setState(() {
-            _generatedYamlMessage =
-                'Error: Received corrupted or invalid YAML package (ZIP archive).\nDetails: $e';
-            _rawFetchedYaml = null;
-          });
           print('ArchiveException: $e');
-        } catch (e) {
-          setState(() {
-            _generatedYamlMessage =
-                'Error processing fetched data: An unexpected error occurred.\nDetails: $e';
-            _rawFetchedYaml = null;
+          if (decodedZipBytes != null) {
+            print(
+                'DEBUG_LOG: ArchiveException caught (${e.message}). Attempting decode with verify: false for diagnostics...');
+            try {
+              final archiveNoValidation =
+                  ZipDecoder().decodeBytes(decodedZipBytes!, verify: false);
+              print(
+                  'DEBUG_LOG: ZIP decoding with verify: false succeeded. Archive contains ${archiveNoValidation.numberOfFiles()} files.');
+              // Optionally, log file names:
+              // print('DEBUG_LOG: Files found (verify: false): ${archiveNoValidation.files.map((f) => f.name).join(', ')}');
+            } catch (eNoValidation) {
+              print(
+                  'DEBUG_LOG: ZIP decoding with verify: false also failed: $eNoValidation');
+            }
+          }
+          // Update the user message logic
+          String userErrorMessage =
+              'Error: Could not read the fetched YAML package (ArchiveException: ${e.message}).';
+          if (e.message
+              .contains('Could not find End of Central Directory Record')) {
+            userErrorMessage =
+                'Error: The fetched YAML package starts correctly but appears to be incomplete or corrupted, as the End of Central Directory Record could not be found. This usually means the data is truncated. Please check the data source or try again.';
+          }
+          setStateIfMounted(() {
+            _generatedYamlMessage = userErrorMessage;
           });
-          print('Error during fetched data processing: $e');
         }
       } else {
         String errorMsg;
