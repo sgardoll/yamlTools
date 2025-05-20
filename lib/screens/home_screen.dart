@@ -41,6 +41,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  String _bytesToHexString(List<int> bytes) {
+    return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join('');
+  }
+
   // Fetches YAML from the API
   Future<void> _fetchProjectYaml() async {
     // Access text directly from controllers
@@ -72,20 +76,60 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (response.statusCode == 200) {
-        // Process ZIP file from response.bodyBytes
         try {
-          final bytes = response.bodyBytes;
-          final archive = ZipDecoder().decodeBytes(bytes, verify: true);
+          // 1. Parse JSON Response
+          Map<String, dynamic> jsonResponse;
+          try {
+            jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
+          } on FormatException catch (e) {
+            setState(() {
+              _generatedYamlMessage = 'Error: API response is not valid JSON.\nDetails: $e';
+              _rawFetchedYaml = null;
+            });
+            print('JSON Parsing Error: $e');
+            return;
+          }
+
+          // 2. Extract and Decode Base64 String
+          if (!jsonResponse.containsKey('project_yaml_bytes')) {
+            setState(() {
+              _generatedYamlMessage = "Error: Unexpected API response structure (missing 'project_yaml_bytes' key).";
+              _rawFetchedYaml = null;
+            });
+            return;
+          }
+          
+          final base64String = jsonResponse['project_yaml_bytes'];
+          if (base64String is! String) {
+             setState(() {
+              _generatedYamlMessage = "Error: Unexpected API response data type for 'project_yaml_bytes' (expected String).";
+              _rawFetchedYaml = null;
+            });
+            return;
+          }
+
+          List<int> zipBytes;
+          try {
+            zipBytes = base64Decode(base64String);
+          } on FormatException catch (e) {
+            setState(() {
+              _generatedYamlMessage = 'Error: Failed to decode YAML data from API response (Base64 decoding failed).\nDetails: $e';
+              _rawFetchedYaml = null;
+            });
+            print('Base64 Decoding Error: $e');
+            return;
+          }
+
+          // 3. Process ZIP Bytes (existing logic moved inside this try block)
+          final archive = ZipDecoder().decodeBytes(zipBytes, verify: true); // Use zipBytes here
 
           ArchiveFile? yamlFile;
-          // Look for 'project.yaml' first
           for (final file in archive.files) {
             if (file.name == 'project.yaml' && file.isFile) {
               yamlFile = file;
               break;
             }
           }
-          // If not found, look for the first .yaml file
           if (yamlFile == null) {
             for (final file in archive.files) {
               if (file.name.endsWith('.yaml') && file.isFile) {
@@ -97,8 +141,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
           if (yamlFile != null) {
             final fileData = yamlFile.content as List<int>;
-            // Decode content to UTF-8 string. 
-            // allowMalformed: true can help prevent exceptions with slightly non-standard files.
             _rawFetchedYaml = utf8.decode(fileData, allowMalformed: true); 
             
             if (_rawFetchedYaml == null || _rawFetchedYaml!.trim().isEmpty) {
@@ -107,7 +149,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 _rawFetchedYaml = null; 
               });
             } else {
-              // Successfully extracted YAML, proceed to parse it
               _parseFetchedYaml(); 
             }
           } else {
@@ -118,16 +159,16 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         } on ArchiveException catch (e) {
           setState(() {
-            _generatedYamlMessage = 'Error processing ZIP file: Invalid archive format.\nDetails: $e';
+            _generatedYamlMessage = 'Error: Received corrupted or invalid YAML package (ZIP archive).\nDetails: $e';
             _rawFetchedYaml = null;
           });
           print('ArchiveException: $e');
-        } catch (e) {
+        } catch (e) { // General catch for JSON, Base64, or ZIP processing stages
           setState(() {
-            _generatedYamlMessage = 'Error extracting YAML from ZIP: An unexpected error occurred.\nDetails: $e';
+            _generatedYamlMessage = 'Error processing fetched data: An unexpected error occurred.\nDetails: $e';
             _rawFetchedYaml = null;
           });
-          print('Error during ZIP extraction: $e');
+          print('Error during fetched data processing: $e');
         }
       } else {
         String errorMsg;
