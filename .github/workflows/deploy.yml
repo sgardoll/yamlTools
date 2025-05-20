@@ -21,6 +21,12 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: List files before build
+        run: |
+          pwd
+          ls -la
+          ls -la web/
+
       - name: Build Web
         run: flutter build web --release --base-href /yamlTools/
 
