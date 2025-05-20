@@ -488,154 +488,201 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     Future.delayed(Duration(milliseconds: 50), () {
-      final promptTrimmed = currentPrompt.trim().toLowerCase();
-
-      // Use string manipulation instead of RegExp for better reliability
-      bool isSetProjectName = promptTrimmed.startsWith('set project name to');
-      bool isCreatePage = promptTrimmed.startsWith('create page') ||
-          promptTrimmed.startsWith('add page');
-      bool isSetBgColor = promptTrimmed.contains('background color') &&
-          promptTrimmed.contains(' to ');
-
       _parsedYamlMap =
           Map<String, dynamic>.from(_parsedYamlMap!); // Ensure mutable
 
-      if (isSetProjectName) {
-        final newName =
-            promptTrimmed.substring('set project name to'.length).trim();
-        if (newName.isEmpty) {
-          _operationMessage = 'Error: New project name cannot be empty.';
-        } else {
-          _parsedYamlMap!['projectName'] = newName;
-          _operationMessage = 'Project name set to "$newName".';
-        }
-      } else if (isCreatePage) {
-        String pageName = '';
-        if (promptTrimmed.startsWith('create page')) {
-          pageName = promptTrimmed.substring('create page'.length).trim();
-        } else {
-          // add page
-          pageName = promptTrimmed.substring('add page'.length).trim();
-        }
+      final parsedCommand = _parseCommand(currentPrompt);
 
-        // Remove quotes if present
-        if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
-            (pageName.startsWith('"') && pageName.endsWith('"'))) {
-          pageName = pageName.substring(1, pageName.length - 1);
-        }
+      if (parsedCommand['action'] == 'ERROR') {
+        _operationMessage = parsedCommand['message'] ?? 'Error: Unknown command parsing error.';
+      } else {
+        final action = parsedCommand['action'] as String;
+        final targetType = parsedCommand['targetType'] as String?;
+        final targetName = parsedCommand['targetName'] as String?;
+        final value = parsedCommand['value'];
+        final options = parsedCommand['options'] as Map<String, dynamic>?;
 
-        if (pageName.isEmpty) {
-          _operationMessage = 'Error: Page name cannot be empty for creation.';
-        } else {
-          if (!_parsedYamlMap!.containsKey('pages')) {
-            _parsedYamlMap!['pages'] = [];
-          }
-          var pagesEntry = _parsedYamlMap!['pages'];
-          if (pagesEntry is! List) {
-            _operationMessage =
-                "Error: 'pages' entry exists but is not a list. Cannot add page.";
-          } else {
-            List<Map<String, dynamic>> typedPagesList = [];
-            bool conversionSuccess = true;
-            for (var item in pagesEntry) {
-              if (item is Map) {
-                typedPagesList.add(Map<String, dynamic>.from(item));
+        switch (action) {
+          case 'SET':
+            if (targetType == 'PROJECT_PROPERTY' && targetName == 'projectName') {
+              if (value is String && value.isNotEmpty) {
+                _parsedYamlMap!['projectName'] = value;
+                _operationMessage = 'Project name set to "$value".';
               } else {
-                conversionSuccess = false;
+                _operationMessage = 'Error: New project name cannot be empty.';
+              }
+            } else if (targetType == 'PAGE_PROPERTY' && targetName != null && options != null) {
+              final pageName = targetName; // Already unquoted by _parseCommand
+              final propertyToSet = options['property'] as String?;
+              final propertyValue = options['value']; // Already unquoted by _parseCommand
+
+              if (propertyToSet == null || propertyValue == null) {
+                  _operationMessage = 'Error: Invalid property settings for page.';
+                  break;
+              }
+
+              if (!_parsedYamlMap!.containsKey('pages') || _parsedYamlMap!['pages'] is! List || (_parsedYamlMap!['pages'] as List).isEmpty) {
+                _operationMessage = 'Error: No pages found or "pages" is not a valid list. Cannot set $propertyToSet.';
+              } else {
+                var pagesList = _parsedYamlMap!['pages'] as List;
+                int pageIndex = -1;
+                Map<String, dynamic>? pageToUpdateData;
+
+                for (int i = 0; i < pagesList.length; i++) {
+                  var page = pagesList[i];
+                  if (page is Map && page.containsKey('name') && page['name']?.toString().toLowerCase() == pageName.toLowerCase()) {
+                    pageToUpdateData = Map<String, dynamic>.from(page);
+                    pageIndex = i;
+                    break;
+                  }
+                }
+
+                if (pageToUpdateData != null && pageIndex != -1) {
+                  pageToUpdateData[propertyToSet] = propertyValue;
+                  pagesList[pageIndex] = pageToUpdateData;
+                  _parsedYamlMap!['pages'] = pagesList;
+                  _operationMessage = '$propertyToSet of page "$pageName" set to "$propertyValue".';
+                } else {
+                  _operationMessage = 'Error: Page named "$pageName" not found.';
+                }
+              }
+            } else if (targetType == 'THEME_COLOR' && targetName != null && value is String) {
+              final colorName = targetName; // Already lowercased and unquoted by _parseCommand
+              final hexValue = value; // Already unquoted by _parseCommand
+
+              _parsedYamlMap!['theme'] ??= <String, dynamic>{};
+              var themeMap = _parsedYamlMap!['theme'] as Map<String, dynamic>;
+              themeMap['colors'] ??= <String, dynamic>{};
+              var colorsMap = themeMap['colors'] as Map<String, dynamic>;
+
+              colorsMap[colorName] = hexValue;
+              _operationMessage = 'Theme color "$colorName" set to "$hexValue".';
+            } else {
+              _operationMessage = 'Error: Unrecognized "SET" command structure.';
+            }
+            break;
+          case 'CREATE':
+            if (targetType == 'PAGE' && targetName != null && targetName.isNotEmpty) {
+              final pageName = targetName; // Already unquoted by _parseCommand
+              if (!_parsedYamlMap!.containsKey('pages')) {
+                _parsedYamlMap!['pages'] = <Map<String, dynamic>>[];
+              }
+              var pagesEntry = _parsedYamlMap!['pages'];
+
+              if (pagesEntry is! List) {
+                _operationMessage = "Error: 'pages' entry exists but is not a list. Cannot add page.";
+              } else {
+                List<Map<String, dynamic>> typedPagesList = [];
+                for (var item in pagesEntry) {
+                  if (item is Map) {
+                    typedPagesList.add(Map<String, dynamic>.from(item));
+                  } else {
+                     _operationMessage = "Error: 'pages' list contains non-map elements. Cannot reliably add page.";
+                     // To prevent further errors, we stop processing this command.
+                     // Consider logging this state or providing a way to fix it.
+                     return; 
+                  }
+                }
+                _parsedYamlMap!['pages'] = typedPagesList; 
+                bool pageExists = typedPagesList.any((p) => p['name']?.toString().toLowerCase() == pageName.toLowerCase());
+
+                if (pageExists) {
+                  _operationMessage = 'Error: Page named "$pageName" already exists.';
+                } else {
+                  typedPagesList.add({
+                    'name': pageName,
+                    'widgets': [], 
+                    'backgroundColor': '#FFFFFF' 
+                  });
+                  _parsedYamlMap!['pages'] = typedPagesList;
+                  _operationMessage = 'Page "$pageName" created successfully.';
+                }
+              }
+            } else {
+              _operationMessage = 'Error: Unrecognized "CREATE" command structure or missing page name.';
+            }
+            break;
+          case 'ADD':
+            if (targetType == 'APPBAR_TO_PAGE' && targetName != null && options != null) {
+              final pageName = targetName; // Already unquoted by _parseCommand
+              final templateName = options['template_name'] as String?; // Already unquoted and lowercased by _parseCommand
+              final titleText = options['title_text'] as String?; // Already unquoted by _parseCommand
+
+              if (!_parsedYamlMap!.containsKey('pages') || _parsedYamlMap!['pages'] is! List) {
+                _operationMessage = 'Error: No pages list found or "pages" is not a list. Cannot add AppBar.';
                 break;
               }
-            }
-            if (!conversionSuccess) {
-              _operationMessage =
-                  "Error: 'pages' list contains elements that are not valid page objects (maps).";
-            } else {
-              _parsedYamlMap!['pages'] = typedPagesList;
-              bool pageExists = typedPagesList.any((p) =>
-                  p['name']?.toString().toLowerCase() ==
-                  pageName.toLowerCase());
-              if (pageExists) {
-                _operationMessage =
-                    'Error: Page named "$pageName" already exists.';
-              } else {
-                typedPagesList.add({'name': pageName, 'widgets': []});
-                _parsedYamlMap!['pages'] = typedPagesList;
-                _operationMessage = 'Page "$pageName" created successfully.';
+              var pagesList = _parsedYamlMap!['pages'] as List;
+              int pageIndex = -1;
+              Map<String, dynamic>? pageToUpdateData;
+
+              for (int i = 0; i < pagesList.length; i++) {
+                var page = pagesList[i];
+                if (page is Map && page.containsKey('name') && page['name']?.toString().toLowerCase() == pageName.toLowerCase()) {
+                  pageToUpdateData = Map<String, dynamic>.from(page);
+                  pageIndex = i;
+                  break;
+                }
               }
+
+              if (pageToUpdateData != null && pageIndex != -1) {
+                Map<String, dynamic> newAppBar = {};
+                if (templateName == 'large_header') { // Already lowercased
+                  newAppBar = {
+                    'templateType': 'LARGE_HEADER',
+                    'backgroundColor': {'themeColor': 'PRIMARY'},
+                    'elevation': 2,
+                    'defaultIcon': {
+                      'sizeValue': {'inputValue': 30},
+                      'colorValue': {'inputValue': {'value': '4294967295'}}, // White
+                      'iconDataValue': {
+                        'inputValue': {
+                          'codePoint': 62834,
+                          'family': 'MaterialIcons',
+                          'matchTextDirection': true,
+                          'name': 'arrow_back_rounded'
+                        }
+                      }
+                    },
+                    'textStyle': {
+                      'themeStyle': 'HEADLINE_MEDIUM',
+                      'fontSizeValue': {'inputValue': 22},
+                      'colorValue': {'inputValue': {'value': '4294967295'}} // White
+                    }
+                  };
+                  // For LARGE_HEADER, an explicit title (if provided) takes precedence or can be set in its own field.
+                  // FlutterFlow's actual behavior for title within LARGE_HEADER might involve specific fields in textStyle or a main title field.
+                  // Here, we add/override a 'title' field for clarity if titleText is provided.
+                  if (titleText != null && titleText.isNotEmpty) {
+                     newAppBar['title'] = {'text': titleText};
+                  } else if (!newAppBar.containsKey('title')){ // Add a default title if none from prompt and template doesn't set one
+                     newAppBar['title'] = {'text': 'Title'}; // Default title for LARGE_HEADER
+                  }
+                } else { // Default or unknown template
+                  newAppBar['backgroundColor'] = {'themeColor': 'PRIMARY'};
+                  newAppBar['title'] = {'text': titleText ?? 'App Bar'}; // Use provided title or a generic default
+                }
+                
+                // If an explicit title was given and it's NOT a large_header template (where title handling is more complex)
+                // ensure the main 'title' field is set.
+                if (titleText != null && titleText.isNotEmpty && templateName != 'large_header') {
+                    newAppBar['title'] = {'text': titleText};
+                }
+
+                pageToUpdateData['appBar'] = newAppBar;
+                pagesList[pageIndex] = pageToUpdateData;
+                _parsedYamlMap!['pages'] = pagesList;
+                _operationMessage = 'AppBar added to page "$pageName" ${templateName != null ? "using template '$templateName'" : ""}.';
+              } else {
+                _operationMessage = 'Error: Page named "$pageName" not found.';
+              }
+            } else {
+              _operationMessage = 'Error: Unrecognized "ADD" command structure.';
             }
-          }
+            break;
+          default:
+            _operationMessage = 'Error: Unrecognized command action.';
         }
-      } else if (isSetBgColor) {
-        String pageName = '';
-        String colorValue = '';
-
-        try {
-          // Extract page name - assuming format "background color of PAGE to COLOR"
-          if (promptTrimmed.contains("background color of ")) {
-            pageName = promptTrimmed
-                .split("background color of ")[1]
-                .split(" to ")[0]
-                .trim();
-            colorValue = promptTrimmed.split(" to ")[1].trim();
-          }
-          // Also handle "bg color of PAGE to COLOR" format
-          else if (promptTrimmed.contains("bg color of ")) {
-            pageName =
-                promptTrimmed.split("bg color of ")[1].split(" to ")[0].trim();
-            colorValue = promptTrimmed.split(" to ")[1].trim();
-          }
-
-          // Remove quotes if present
-          if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
-              (pageName.startsWith('"') && pageName.endsWith('"'))) {
-            pageName = pageName.substring(1, pageName.length - 1);
-          }
-
-          if ((colorValue.startsWith("'") && colorValue.endsWith("'")) ||
-              (colorValue.startsWith('"') && colorValue.endsWith('"'))) {
-            colorValue = colorValue.substring(1, colorValue.length - 1);
-          }
-        } catch (e) {
-          _operationMessage =
-              'Error parsing background color command. Format should be: "set background color of PAGE to COLOR"';
-          return;
-        }
-
-        if (!_parsedYamlMap!.containsKey('pages') ||
-            _parsedYamlMap!['pages'] is! List ||
-            (_parsedYamlMap!['pages'] as List).isEmpty) {
-          _operationMessage =
-              'Error: No pages found or "pages" is not a valid list. Cannot set background color.';
-        } else {
-          var pagesList = _parsedYamlMap!['pages'] as List;
-          int pageIndex = -1;
-          Map<String, dynamic>? pageToUpdate;
-          for (int i = 0; i < pagesList.length; i++) {
-            var page = pagesList[i];
-            if (page is Map &&
-                page.containsKey('name') &&
-                page['name']?.toString().toLowerCase() ==
-                    pageName.toLowerCase()) {
-              pageToUpdate = Map<String, dynamic>.from(page);
-              pageIndex = i;
-              break;
-            }
-          }
-          if (pageToUpdate != null && pageIndex != -1) {
-            pageToUpdate['backgroundColor'] = colorValue;
-            pagesList[pageIndex] = pageToUpdate;
-            _parsedYamlMap!['pages'] = pagesList;
-            _operationMessage =
-                'Background color of page "$pageName" set to "$colorValue".';
-          } else {
-            _operationMessage = 'Error: Page named "$pageName" not found.';
-          }
-        }
-      } else {
-        _operationMessage = 'Prompt not recognized. Examples:\n'
-            '- Set project name to MyNewApp\n'
-            '- Create page \'UserProfile\'\n'
-            '- Add page "SettingsPage"\n'
-            '- Set background color of page "UserProfile" to "blue"';
       }
 
       try {
@@ -654,8 +701,114 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Map<String, dynamic> _parseCommand(String prompt) {
+    final originalPromptTrimmed = prompt.trim(); // Use this for extracting original case values if needed before lowercasing.
+    final promptLower = originalPromptTrimmed.toLowerCase();
+
+    // Helper to unquote
+    String unquote(String text) {
+      text = text.trim(); 
+      if ((text.startsWith("'") && text.endsWith("'")) ||
+          (text.startsWith('"') && text.endsWith('"'))) {
+        return text.substring(1, text.length - 1).trim(); 
+      }
+      return text;
+    }
+
+    // Pattern: set project name to <name>
+    RegExp setProjectNameRegExp = RegExp(r'^set project name to\s+(.+)$', caseSensitive: false);
+    Match? match = setProjectNameRegExp.firstMatch(originalPromptTrimmed);
+    if (match != null) {
+      return {
+        'action': 'SET',
+        'targetType': 'PROJECT_PROPERTY',
+        'targetName': 'projectName', // This is fixed
+        'value': unquote(match.group(1)!),
+      };
+    }
+
+    // Pattern: create page <name> OR add page <name>
+    RegExp createPageRegExp = RegExp(r'^(create|add)\s+page\s+(.+)$', caseSensitive: false);
+    match = createPageRegExp.firstMatch(originalPromptTrimmed);
+    if (match != null) {
+      return {
+        'action': 'CREATE',
+        'targetType': 'PAGE',
+        'targetName': unquote(match.group(2)!),
+      };
+    }
+
+    // Pattern: set background color of page <page> to <color>
+    RegExp setPageBgColorRegExp = RegExp(r'^set\s+(?:background|bg)\s+color\s+of\s+page\s+(.+?)\s+to\s+(.+)$', caseSensitive: false);
+    match = setPageBgColorRegExp.firstMatch(originalPromptTrimmed);
+    if (match != null) {
+      return {
+        'action': 'SET',
+        'targetType': 'PAGE_PROPERTY',
+        'targetName': unquote(match.group(1)!), // Page name
+        'options': {
+          'property': 'backgroundColor', 
+          'value': unquote(match.group(2)!), // Color value
+        }
+      };
+    }
+
+    // Pattern: SET THEME_COLOR <color_name> TO <hex_value>
+    RegExp setThemeColorRegExp = RegExp(r'^set\s+theme_color\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+to\s+([#a-fA-F0-9]+)$', caseSensitive: false);
+    match = setThemeColorRegExp.firstMatch(originalPromptTrimmed);
+    if (match != null) {
+      return {
+        'action': 'SET',
+        'targetType': 'THEME_COLOR',
+        'targetName': match.group(1)!.toLowerCase(), // color_name (e.g. primary, secondaryText) - normalized to lowercase
+        'value': match.group(2)!, // hex_value (e.g. #FF00FF00 or FF00FF00) - preserve case as entered
+      };
+    }
+    
+    // Pattern: ADD APPBAR TO PAGE <page_name> [USING TEMPLATE <template_name>] [WITH TITLE <title_text>]
+    // Page name can be quoted or unquoted. Template name and title can be quoted or unquoted.
+    RegExp addAppBarRegExp = RegExp(
+      r'^add\s+appbar\s+to\s+page\s+(' + // Start Page Name
+          r'''(?:[^'\s"]+|'[^']*'|"[^"]*")''' + // Page name: unquoted, or single/double quoted
+      r')' + // End Page Name
+      r'(?:\s+using\s+template\s+(' + // Start Optional Template
+          r'''(?:[^'\s"]+|'[^']*'|"[^"]*")''' + // Template name: unquoted, or single/double quoted
+      r'))?' + // End Optional Template
+      r'(?:\s+with\s+title\s+(' + // Start Optional Title
+          r'''(?:[^'\s"]+|'[^']*'|"[^"]*")''' + // Title text: unquoted, or single/double quoted
+      r'))?$', // End Optional Title
+      caseSensitive: false);
+
+    match = addAppBarRegExp.firstMatch(originalPromptTrimmed);
+    if (match != null) {
+      Map<String, dynamic> options = {};
+      if (match.group(2) != null) { // template_name
+        options['template_name'] = unquote(match.group(2)!).toLowerCase(); // Normalize template name to lowercase
+      }
+      if (match.group(3) != null) { // title_text
+        options['title_text'] = unquote(match.group(3)!);
+      }
+      return {
+        'action': 'ADD',
+        'targetType': 'APPBAR_TO_PAGE',
+        'targetName': unquote(match.group(1)!), // page_name
+        'options': options,
+      };
+    }
+
+    return {'action': 'ERROR', 'message': 'Error: Unrecognized command structure. Examples:\n'
+            '- Set project name to MyNewApp\n'
+            '- Create page \'UserProfile\'\n'
+            '- Add page "SettingsPage"\n'
+            '- Set background color of page "UserProfile" to "blue"\n'
+            '- Set theme_color primary TO #FF00FF00\n'
+            '- Set theme_color secondary_text TO FFCCCCCC\n'
+            '- Add appbar to page HomePage using template LARGE_HEADER with title "My Home"\n'
+            '- Add appbar to page SettingsPage with title "Settings"\n'
+            '- Add appbar to page DashboardPage'};
+  }
+
   Future<void> _handleFetchOrGenerate() async {
-    // Removed the setState for "Processing..." as individual methods set their own status.
     if (_rawFetchedYaml == null || _parsedYamlMap == null) {
       await _fetchProjectYaml();
     } else {
