@@ -618,20 +618,48 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Backup all archive files before modifications
+    Map<String, String> archiveBackup = {};
+    _exportedFiles.forEach((key, value) {
+      if (key.startsWith('archive_')) {
+        archiveBackup[key] = value;
+      }
+    });
+
+    // Also backup the combined content
+    String? combinedContentBackup = _exportedFiles['ALL_CONTENT_COMBINED.yaml'];
+
+    // Find and backup the largest file for later restoration
+    String largestContent = "";
+    String largestFileName = "";
+    archiveBackup.forEach((key, value) {
+      if (value.length > largestContent.length) {
+        largestContent = value;
+        largestFileName = key;
+      }
+    });
+
+    if (largestContent.isNotEmpty) {
+      print(
+          'DEBUG: Backed up largest file ($largestFileName) with ${largestContent.length} chars');
+    }
+
+    // Store a copy of the existing files before modification
+    Map<String, String> preModificationFiles =
+        Map<String, String>.from(_exportedFiles);
+
     setState(() {
       _generatedYamlMessage = 'Processing prompt...';
       _operationMessage = ''; // Reset operation message
       _hasModifications =
           true; // Set flag to indicate modifications are being made
+
+      // Clear changed files to start fresh
+      _changedFiles.clear();
     });
 
     Future.delayed(Duration(milliseconds: 50), () {
       final promptTrimmed = currentPrompt.trim().toLowerCase();
-
-      // Store a copy of the original YAML map before modifications if not already stored
-      if (_originalFiles.isEmpty) {
-        _prepareFilesForExport(); // This will initialize _originalFiles
-      }
 
       // Use string manipulation instead of RegExp for better reliability
       bool isSetProjectName = promptTrimmed.startsWith('set project name to');
@@ -1018,31 +1046,80 @@ class _HomeScreenState extends State<HomeScreen> {
 
       try {
         final yamlString = _mapToYamlString(_parsedYamlMap!);
+
+        // Clear the changed files before adding new ones
+        _changedFiles.clear();
+
         setState(() {
           _generatedYamlMessage =
               '$_operationMessage\n\nModified YAML:\n\n$yamlString';
 
           // Also save the current state for potential export
+          Map<String, String> currentFiles =
+              Map<String, String>.from(_exportedFiles);
           _exportedFiles.clear(); // Clear existing files before regenerating
 
-          // Always ensure we preserve the complete raw YAML
-          if (_rawFetchedYaml != null) {
-            _exportedFiles['complete_raw.yaml'] = _rawFetchedYaml!;
+          // Restore archive files from backup (but don't show them in changed files)
+          archiveBackup.forEach((key, value) {
+            _exportedFiles[key] = value;
+          });
+
+          // Restore combined content
+          if (combinedContentBackup != null &&
+              combinedContentBackup.isNotEmpty) {
+            _exportedFiles['ALL_CONTENT_COMBINED.yaml'] = combinedContentBackup;
+            print(
+                'DEBUG: Restored combined file with ${combinedContentBackup.length} chars');
           }
 
+          // Store the largest content in raw_project.yaml and complete_raw.yaml
+          if (largestContent.isNotEmpty) {
+            _exportedFiles['complete_raw.yaml'] = largestContent;
+            _exportedFiles['raw_project.yaml'] = largestContent;
+            print(
+                'DEBUG: Restored largest content to raw files (${largestContent.length} chars)');
+          }
+
+          // Add the modified content as separate files and mark them as changed ONLY
+          _exportedFiles['modified_yaml.yaml'] = yamlString;
+          _changedFiles['modified_yaml.yaml'] = yamlString;
+
           _exportedFiles['raw_output.yaml'] = yamlString;
+          _changedFiles['raw_output.yaml'] = yamlString;
+
+          // Show header file with modification information
+          String headerContent = 'YAML MODIFICATION: $currentPrompt\n\n';
+          headerContent += 'Applied on ${DateTime.now()}\n';
+          headerContent += '-----------------------------------\n\n';
+          headerContent += yamlString;
+
+          _exportedFiles['modification_details.yaml'] = headerContent;
+          _changedFiles['modification_details.yaml'] = headerContent;
+
+          print(
+              'DEBUG: Added modified YAML files with ${yamlString.length} chars each');
+
+          // Log the file sizes after restoration
+          print('DEBUG: Files shown after modification:');
+          _changedFiles.forEach((key, value) {
+            print('DEBUG: - $key: ${value.length} chars');
+          });
         });
 
-        // Prepare files for export after successful processing
         // Make sure _hasModifications is set to ensure we show changed files
         setState(() {
           _hasModifications = true;
         });
-        _prepareFilesForExport();
+
+        // Auto-expand modified files
+        _expandedFiles.clear();
+        _expandedFiles.add('modification_details.yaml');
+        _expandedFiles.add('modified_yaml.yaml');
 
         // Debug information
         print("Changed files count: ${_changedFiles.length}");
-        print("Files detected as changed: ${_changedFiles.keys.join(', ')}");
+        print(
+            "Files shown after modification: ${_changedFiles.keys.join(', ')}");
       } catch (e) {
         setState(() {
           _generatedYamlMessage =
@@ -1220,17 +1297,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Make sure our key files are shown first
     List<String> orderedKeys = filesToShow.keys.toList();
-    orderedKeys.sort((a, b) {
-      // Show archive files first
-      if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
-      if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
-      // Then show complete raw
-      if (a.contains('complete_raw.yaml')) return -1;
-      if (b.contains('complete_raw.yaml')) return 1;
-      if (a.contains('raw_project.yaml')) return -1;
-      if (b.contains('raw_project.yaml')) return 1;
-      return a.compareTo(b);
-    });
+
+    // Add modified_yaml.yaml first if it exists
+    if (_hasModifications) {
+      orderedKeys.sort((a, b) {
+        // Give priority to the modified_yaml.yaml file
+        if (a == 'modified_yaml.yaml') return -1;
+        if (b == 'modified_yaml.yaml') return 1;
+        if (a == 'raw_output.yaml') return -1;
+        if (b == 'raw_output.yaml') return 1;
+        return a.compareTo(b);
+      });
+    } else {
+      orderedKeys.sort((a, b) {
+        // Show archive files first
+        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
+        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
+        // Then show complete raw
+        if (a.contains('complete_raw.yaml')) return -1;
+        if (b.contains('complete_raw.yaml')) return 1;
+        if (a.contains('raw_project.yaml')) return -1;
+        if (b.contains('raw_project.yaml')) return 1;
+        return a.compareTo(b);
+      });
+    }
 
     // Debug all file names and sizes
     for (var fileName in orderedKeys) {
@@ -1542,13 +1632,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Helper to export YAML to multiple files
   void _prepareFilesForExport() {
-    if (_parsedYamlMap == null) return;
+    if (_parsedYamlMap == null && _exportedFiles.isEmpty) return;
 
     // First log all original sizes for debugging
     print('DEBUG: Original export files:');
     _exportedFiles.forEach((key, value) {
       print('DEBUG: - $key: ${value.length} chars');
     });
+
+    // If we're in modification mode and there are no archive files, don't try to process them
+    if (_hasModifications &&
+        !_exportedFiles.keys.any((key) => key.startsWith('archive_'))) {
+      print(
+          'DEBUG: In modification mode with no archive files, skipping file regeneration');
+
+      // Just make sure the _changedFiles are populated
+      _changedFiles = Map<String, String>.from(_exportedFiles);
+      return;
+    }
 
     // Store archive files in a temporary map to preserve them
     Map<String, String> archiveFiles = {};
@@ -1557,6 +1658,25 @@ class _HomeScreenState extends State<HomeScreen> {
         archiveFiles[key] = value;
       }
     });
+
+    // If no archive files are found but we have existing content in specific files, preserve it
+    if (archiveFiles.isEmpty) {
+      if (_exportedFiles.containsKey('complete_raw.yaml') &&
+          _exportedFiles['complete_raw.yaml']!.isNotEmpty) {
+        print(
+            'DEBUG: No archive files found, preserving existing complete_raw.yaml content');
+        archiveFiles['preserved_complete_raw'] =
+            _exportedFiles['complete_raw.yaml']!;
+      }
+
+      if (_exportedFiles.containsKey('ALL_CONTENT_COMBINED.yaml') &&
+          _exportedFiles['ALL_CONTENT_COMBINED.yaml']!.isNotEmpty) {
+        print(
+            'DEBUG: No archive files found, preserving existing ALL_CONTENT_COMBINED.yaml content');
+        archiveFiles['preserved_combined'] =
+            _exportedFiles['ALL_CONTENT_COMBINED.yaml']!;
+      }
+    }
 
     // Create a combined file with all content
     StringBuffer combinedContent = StringBuffer();
@@ -1597,14 +1717,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _exportedFiles[key] = value;
     });
 
-    // Add the combined all-in-one file
+    // Add the combined all-in-one file if we have content to combine
     String combinedString = combinedContent.toString();
-    _exportedFiles['ALL_CONTENT_COMBINED.yaml'] = combinedString;
-    print(
-        'DEBUG: Created ALL_CONTENT_COMBINED.yaml with ${combinedString.length} chars');
+    if (combinedString.isNotEmpty) {
+      _exportedFiles['ALL_CONTENT_COMBINED.yaml'] = combinedString;
+      print(
+          'DEBUG: Created ALL_CONTENT_COMBINED.yaml with ${combinedString.length} chars');
 
-    // Also make this the "complete_raw.yaml" file
-    _exportedFiles['complete_raw.yaml'] = combinedString;
+      // Also make this the "complete_raw.yaml" file
+      _exportedFiles['complete_raw.yaml'] = combinedString;
+    }
 
     // And make the largest individual file the raw_project.yaml
     if (largestContent.isNotEmpty) {
@@ -1622,6 +1744,12 @@ class _HomeScreenState extends State<HomeScreen> {
       if (key != 'complete_raw.yaml' && key != 'raw_project.yaml') {
         _exportedFiles[key] = value;
       }
+    });
+
+    // Log the file sizes after regeneration
+    print('DEBUG: File sizes after regeneration:');
+    _exportedFiles.forEach((key, value) {
+      print('DEBUG: - $key: ${value.length} chars');
     });
 
     // If this is the first load, save as original files
