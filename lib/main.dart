@@ -9,7 +9,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'YAML Generator',
+      title: 'FlutterFlow YAML Tools',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
