@@ -46,9 +46,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // Track which files are expanded
   Set<String> _expandedFiles = {};
 
-  // Add filter option to hide detailed files
-  bool _showDetailedFiles = false;
-
   final _projectIdController = TextEditingController();
   final _apiTokenController = TextEditingController();
   final _promptController = TextEditingController();
@@ -1557,22 +1554,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // Find the largest file for the quick copy button
-    String largestFileName = "";
-    int largestFileSize = 0;
-
-    for (var fileName in orderedKeys) {
-      String content = filesToShow[fileName] ?? '';
-      if (content.length > largestFileSize) {
-        largestFileSize = content.length;
-        largestFileName = fileName;
-      }
-    }
-
     String statusMessage = "Found ${orderedKeys.length} files";
-    if (largestFileSize > 0) {
-      statusMessage += " (largest: ${largestFileSize} chars)";
-    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1607,38 +1589,6 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(statusMessage,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600])),
             Spacer(),
-            Row(
-              children: [
-                Text('Show Detailed Files:', style: TextStyle(fontSize: 12)),
-                Switch(
-                  value: _showDetailedFiles,
-                  onChanged: (value) {
-                    setState(() {
-                      _showDetailedFiles = value;
-                    });
-                  },
-                  activeColor: Colors.green,
-                ),
-                SizedBox(width: 8),
-                if (largestFileSize > 0)
-                  ElevatedButton.icon(
-                    icon: Icon(Icons.file_copy, size: 14),
-                    label: Text('Copy Largest File',
-                        style: TextStyle(fontSize: 12)),
-                    onPressed: () {
-                      String content = filesToShow[largestFileName] ?? '';
-                      if (content.isNotEmpty) {
-                        _fallbackClipboardCopy(
-                            context, largestFileName, content);
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      backgroundColor: Colors.deepPurple,
-                    ),
-                  ),
-              ],
-            ),
           ],
         ),
         SizedBox(height: 8),
@@ -1652,17 +1602,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemCount: orderedKeys.length,
                   itemBuilder: (context, index) {
                     String fileName = orderedKeys[index];
-
-                    // Skip detailed files if filter is enabled
-                    if (!_showDetailedFiles) {
-                      // Skip deeply nested files but keep important ones
-                      if (fileName.startsWith('archive_') &&
-                          !fileName.contains('ALL_CONTENT_COMBINED') &&
-                          fileName.contains('/') &&
-                          fileName.split('/').length > 3) {
-                        return SizedBox.shrink(); // Invisible widget
-                      }
-                    }
 
                     String fileContent = filesToShow[fileName] ?? '';
                     bool isExpanded = _expandedFiles.contains(fileName);
@@ -1797,14 +1736,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                   Row(
                                     children: [
-                                      // Allow editing for non-archive files
-                                      if (!isArchiveFile && isExpanded)
+                                      // Allow editing for all files when expanded
+                                      if (isExpanded)
                                         IconButton(
                                           icon: Icon(
                                             isEditing ? Icons.save : Icons.edit,
                                             size: 18,
-                                            color:
-                                                isEditing ? Colors.green : null,
+                                            color: isEditing
+                                                ? Colors.green[600]
+                                                : null,
                                           ),
                                           tooltip: isEditing
                                               ? 'Save changes'
@@ -1881,11 +1821,21 @@ class _HomeScreenState extends State<HomeScreen> {
                                         fontSize: 14,
                                       ),
                                     )
-                                  : SingleChildScrollView(
-                                      child: SelectableText(
-                                        fileContent,
-                                        style:
-                                            TextStyle(fontFamily: 'monospace'),
+                                  : InkWell(
+                                      onTap: () {
+                                        // Enter edit mode when text is clicked
+                                        setState(() {
+                                          _fileEditModes[fileName] = true;
+                                          _fileControllers[fileName]!.text =
+                                              fileContent;
+                                        });
+                                      },
+                                      child: SingleChildScrollView(
+                                        child: SelectableText(
+                                          fileContent,
+                                          style: TextStyle(
+                                              fontFamily: 'monospace'),
+                                        ),
                                       ),
                                     ),
                             ),
