@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert'; // Keep for potential future JSON parts, though YAML is primary
+import 'dart:convert'; // For utf8 decoding & JSON
 import 'package:yaml/yaml.dart';
+import 'package:archive/archive.dart'; // For ZIP file handling
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -15,12 +16,25 @@ class _HomeScreenState extends State<HomeScreen> {
   final _apiTokenController = TextEditingController();
   
   String? _rawFetchedYaml; // To store the raw YAML string from API
-  Map<String, dynamic>? _parsedYamlMap; // To store the parsed YAML
-  String _generatedYamlMessage = 'Enter Project ID and API Token to fetch YAML.'; // Display messages/results
+  Map<String, dynamic>? _parsedYamlMap; 
+  String _generatedYamlMessage = "Enter Project ID and API Token, then click 'Fetch YAML'. Once YAML is loaded, enter a prompt and click 'Generate from Prompt'."; // Updated initial message
+
+  @override
+  void initState() {
+    super.initState();
+    // Listener to update button state based on prompt text
+    _promptController.addListener(_updateButtonState);
+  }
+
+  void _updateButtonState() {
+    setState(() {
+      // This rebuilds the widget tree, updating button state
+    });
+  }
 
   @override
   void dispose() {
-    // Dispose controllers when the widget is removed from the widget tree
+    _promptController.removeListener(_updateButtonState);
     _promptController.dispose();
     _projectIdController.dispose();
     _apiTokenController.dispose();
@@ -58,14 +72,62 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (response.statusCode == 200) {
-        _rawFetchedYaml = response.body;
-        if (_rawFetchedYaml == null || _rawFetchedYaml!.trim().isEmpty) {
-           setState(() {
-            _generatedYamlMessage = 'Error: Fetched YAML is empty or whitespace.';
-            _rawFetchedYaml = null; // Ensure it's null if invalid
+        // Process ZIP file from response.bodyBytes
+        try {
+          final bytes = response.bodyBytes;
+          final archive = ZipDecoder().decodeBytes(bytes, verify: true);
+
+          ArchiveFile? yamlFile;
+          // Look for 'project.yaml' first
+          for (final file in archive.files) {
+            if (file.name == 'project.yaml' && file.isFile) {
+              yamlFile = file;
+              break;
+            }
+          }
+          // If not found, look for the first .yaml file
+          if (yamlFile == null) {
+            for (final file in archive.files) {
+              if (file.name.endsWith('.yaml') && file.isFile) {
+                yamlFile = file;
+                break;
+              }
+            }
+          }
+
+          if (yamlFile != null) {
+            final fileData = yamlFile.content as List<int>;
+            // Decode content to UTF-8 string. 
+            // allowMalformed: true can help prevent exceptions with slightly non-standard files.
+            _rawFetchedYaml = utf8.decode(fileData, allowMalformed: true); 
+            
+            if (_rawFetchedYaml == null || _rawFetchedYaml!.trim().isEmpty) {
+              setState(() {
+                _generatedYamlMessage = 'Error: Extracted YAML file is empty or contains only whitespace.';
+                _rawFetchedYaml = null; 
+              });
+            } else {
+              // Successfully extracted YAML, proceed to parse it
+              _parseFetchedYaml(); 
+            }
+          } else {
+            setState(() {
+              _generatedYamlMessage = 'Error: No ".yaml" file (e.g., project.yaml) found in the downloaded ZIP archive.';
+              _rawFetchedYaml = null;
+            });
+          }
+        } on ArchiveException catch (e) {
+          setState(() {
+            _generatedYamlMessage = 'Error processing ZIP file: Invalid archive format.\nDetails: $e';
+            _rawFetchedYaml = null;
           });
-        } else {
-          _parseFetchedYaml(); // Parse after fetching
+          print('ArchiveException: $e');
+        } catch (e) {
+          setState(() {
+            _generatedYamlMessage = 'Error extracting YAML from ZIP: An unexpected error occurred.\nDetails: $e';
+            _rawFetchedYaml = null;
+          });
+          print('Error during ZIP extraction: $e');
         }
       } else {
         String errorMsg;
@@ -109,9 +171,18 @@ class _HomeScreenState extends State<HomeScreen> {
       var loadedData = loadYaml(_rawFetchedYaml!);
       if (loadedData is YamlMap) {
         _parsedYamlMap = _convertYamlNode(loadedData) as Map<String, dynamic>?;
-        setState(() {
-          _generatedYamlMessage = 'YAML fetched and parsed successfully. Enter a prompt and click the button again to generate/modify.';
-        });
+        if (_parsedYamlMap != null) {
+          // Display the fetched YAML immediately
+          final yamlString = _mapToYamlString(_parsedYamlMap!);
+          setState(() {
+            _generatedYamlMessage = 'Fetched Project YAML:\n\n$yamlString';
+          });
+        } else {
+          _parsedYamlMap = null; // Ensure consistency
+          setState(() {
+            _generatedYamlMessage = 'Error: Could not convert fetched YAML to a readable map format.';
+          });
+        }
       } else {
         _parsedYamlMap = null; 
         setState(() {
@@ -135,21 +206,117 @@ class _HomeScreenState extends State<HomeScreen> {
   
   // Helper to recursively convert YamlMap/YamlList to Dart Map/List.
   // Ensures that the top-level result is correctly typed if it's a map.
-  dynamic _convertYamlNode(dynamic nodeValue) { // Renamed 'node' to 'nodeValue' for clarity
+  dynamic _convertYamlNode(dynamic nodeValue) { 
     if (nodeValue is YamlMap) {
       final Map<String, dynamic> newMap = {};
-      nodeValue.nodes.forEach((keyNode, valueNode) { // keyNode is YamlNode, valueNode is YamlNode
+      nodeValue.nodes.forEach((keyNode, valueNode) { 
         String key = (keyNode is YamlScalar) ? keyNode.value.toString() : keyNode.toString();
-        newMap[key] = _convertYamlNode(valueNode.value); // Recurse on the .value of the YamlNode
+        newMap[key] = _convertYamlNode(valueNode.value); 
       });
       return newMap;
     } else if (nodeValue is YamlList) {
-      return List<dynamic>.from(nodeValue.nodes.map((itemNode) => _convertYamlNode(itemNode.value))); // Recurse on the .value of the YamlNode
+      return List<dynamic>.from(nodeValue.nodes.map((itemNode) => _convertYamlNode(itemNode.value)));
     }
-    // If nodeValue is YamlScalar, its .value is the actual primitive (String, num, bool).
-    // If nodeValue is already a primitive (e.g. from a previous conversion), return as is.
     return nodeValue is YamlScalar ? nodeValue.value : nodeValue;
   }
+
+  // Custom YAML Serializer
+  String _mapToYamlString(Map<String, dynamic> map) {
+    return _nodeToYamlString(map, 0, false);
+  }
+
+  String _nodeToYamlString(dynamic node, int indentLevel, bool isListItemContext) {
+    String indent = '  ' * indentLevel;
+    StringBuffer yamlBuffer = StringBuffer();
+
+    if (node is Map) {
+      if (isListItemContext && node.isNotEmpty) { 
+        // If it's a map as a list item, subsequent lines should align with the first key, not the dash.
+        // The first key will be handled by the loop, adding its own indent.
+        // This effectively means the map's content starts at `indentLevel` if it's a list item.
+      }
+      int i = 0;
+      node.forEach((key, value) {
+        String currentItemIndent = indent;
+        if (isListItemContext && i == 0) {
+          // First item of a map in a list context: `- key:`
+          // The dash is handled by the list serializer part. Here we just provide `key:`
+          currentItemIndent = ''; 
+        } else if (isListItemContext && i > 0) {
+          // Subsequent items of a map in list context: `  key:`
+          currentItemIndent = '  ' * (indentLevel); // Align with the key above it.
+        }
+        
+        yamlBuffer.write(currentItemIndent);
+        yamlBuffer.write(key);
+        yamlBuffer.write(': ');
+
+        if (value is Map) {
+          yamlBuffer.write('\n');
+          yamlBuffer.write(_nodeToYamlString(value, indentLevel + 1, false));
+        } else if (value is List) {
+          yamlBuffer.write('\n');
+          yamlBuffer.write(_nodeToYamlString(value, indentLevel + 1, false));
+        } else {
+          yamlBuffer.write(_escapeStringForYaml(value.toString()));
+          if (i < node.length - 1 || isListItemContext ) yamlBuffer.write('\n');
+        }
+        i++;
+      });
+       // Remove trailing newline if it's the last line of the map and not in list context
+      if (yamlBuffer.toString().endsWith('\n') && !isListItemContext && indentLevel > 0) {
+         //This is too aggressive, let's rely on caller to manage last newline
+      }
+
+    } else if (node is List) {
+      for (int i = 0; i < node.length; i++) {
+        var item = node[i];
+        yamlBuffer.write(indent);
+        yamlBuffer.write('- ');
+        if (item is Map) {
+          // For a map in a list, the first key-value pair should be on the same line as the dash if simple,
+          // or the key starts on the next line, indented. Simpler for now: start map on next line.
+          // No, let's try to make it `  - key: value` if map has one simple entry
+          // or `  - \n    key: value` if complex.
+          // Current approach: `- \n key: value`
+          // Let's adjust _nodeToYamlString for map in list context
+          String mapStr = _nodeToYamlString(item, indentLevel + 1, true); // Pass true for list item context
+          if (mapStr.startsWith('  ')) mapStr = mapStr.substring(2); // remove indent if map added it
+          yamlBuffer.write(mapStr); // mapStr already contains newlines if multi-line
+           if (!mapStr.endsWith('\n')) yamlBuffer.write('\n');
+
+        } else if (item is List) {
+          yamlBuffer.write('\n'); // Newline after '- ' for nested list
+          yamlBuffer.write(_nodeToYamlString(item, indentLevel + 1, false)); // Nested list items are not direct map children
+        } else {
+          yamlBuffer.write(_escapeStringForYaml(item.toString()));
+          if (i < node.length - 1) yamlBuffer.write('\n');
+        }
+      }
+    } else {
+      // Basic types (String, num, bool)
+      yamlBuffer.write(_escapeStringForYaml(node.toString()));
+    }
+    return yamlBuffer.toString();
+  }
+
+  String _escapeStringForYaml(String value) {
+    // Basic escaping: if string contains newline or starts/ends with space, or has ':' followed by space, quote it.
+    // This is a very simplified version. For full YAML spec, more robust quoting/escaping is needed.
+    if (value.contains('\n') || value.startsWith(' ') || value.endsWith(' ') || value.contains(': ')) {
+      // Replace single quotes with two single quotes if using single quotes
+      // Using double quotes is often safer for arbitrary strings.
+      return '"${value.replaceAll('"', '\\"')}"'; 
+    }
+    // Check if it looks like a number, bool, or null, but should be a string
+    if (value == 'true' || value == 'false' || value == 'null' || double.tryParse(value) != null) {
+        // If it's one of these keywords or looks like a number but is meant to be a string, quote it.
+        // This check is context-dependent; for now, we assume if it's a string type, it should be treated as such.
+        // A more sophisticated type check would be needed if the original types were preserved.
+    }
+    return value;
+  }
+
 
   // Processes the prompt and modifies the YAML (currently just project name)
   void _processPromptAndGenerateYaml() {
@@ -209,15 +376,12 @@ class _HomeScreenState extends State<HomeScreen> {
             if (pagesEntry is! List) {
               operationMessage = "Error: 'pages' entry exists but is not a list. Cannot add page.";
             } else {
-              // Ensure all elements in pagesEntry are Map<String, dynamic>
               List<Map<String, dynamic>> typedPagesList = [];
               bool conversionSuccess = true;
               for (var item in pagesEntry) {
                 if (item is Map) {
                   typedPagesList.add(Map<String, dynamic>.from(item));
                 } else {
-                  // Handle case where an item is not a map, perhaps by skipping or erroring
-                  // For now, let's error if structure is not as expected.
                   conversionSuccess = false;
                   break;
                 }
@@ -226,12 +390,13 @@ class _HomeScreenState extends State<HomeScreen> {
               if (!conversionSuccess) {
                 operationMessage = "Error: 'pages' list contains elements that are not valid page objects (maps).";
               } else {
-                 _parsedYamlMap!['pages'] = typedPagesList; // Use the correctly typed list
+                _parsedYamlMap!['pages'] = typedPagesList; 
                 bool pageExists = typedPagesList.any((p) => p['name']?.toString().toLowerCase() == pageName.toLowerCase());
                 if (pageExists) {
                   operationMessage = 'Error: Page named "$pageName" already exists.';
                 } else {
                   typedPagesList.add({'name': pageName, 'widgets': []});
+                  _parsedYamlMap!['pages'] = typedPagesList; // Ensure the main map is updated
                   operationMessage = 'Page "$pageName" created successfully.';
                 }
               }
@@ -255,7 +420,7 @@ class _HomeScreenState extends State<HomeScreen> {
               for (int i = 0; i < pagesList.length; i++) {
                   var page = pagesList[i];
                   if (page is Map && page.containsKey('name') && page['name']?.toString().toLowerCase() == pageName.toLowerCase()) {
-                      pageToUpdate = Map<String, dynamic>.from(page); // Make it mutable
+                      pageToUpdate = Map<String, dynamic>.from(page); 
                       pageIndex = i;
                       break;
                   }
@@ -263,7 +428,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
               if (pageToUpdate != null && pageIndex != -1) {
                 pageToUpdate['backgroundColor'] = colorValue;
-                pagesList[pageIndex] = pageToUpdate; // Update the list with the modified map
+                pagesList[pageIndex] = pageToUpdate; 
+                _parsedYamlMap!['pages'] = pagesList; // Ensure the main map is updated
                 operationMessage = 'Background color of page "$pageName" set to "$colorValue".';
               } else {
                 operationMessage = 'Error: Page named "$pageName" not found.';
@@ -281,19 +447,19 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
 
-      // Finalize by setting the message and converting map to JSON for display
+      // Finalize by setting the message and converting map to YAML for display
       try {
-        final jsonEncoder = JsonEncoder.withIndent('  ');
-        final jsonString = jsonEncoder.convert(_parsedYamlMap);
+        // Use _mapToYamlString instead of JsonEncoder
+        final yamlString = _mapToYamlString(_parsedYamlMap!); 
         setState(() {
-          _generatedYamlMessage = '$operationMessage\n\nModified YAML (displayed as JSON):\n\n$jsonString';
+          _generatedYamlMessage = '$operationMessage\n\nModified YAML:\n\n$yamlString';
         });
       } catch (e) {
         setState(() {
-          // If JSON conversion fails, show the operation message and the error
-          _generatedYamlMessage = '$operationMessage\n\nCould not display full structure as JSON.\nError details: $e';
+          // If YAML conversion fails, show the operation message and the error
+          _generatedYamlMessage = '$operationMessage\n\nCould not display full structure as YAML.\nError details: $e';
         });
-        print('Error converting map to JSON for display: $e');
+        print('Error converting map to YAML for display: $e');
       }
     });
   }
@@ -343,8 +509,12 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _handleFetchOrGenerate,
-              child: Text(_rawFetchedYaml == null ? 'Fetch YAML' : 'Generate from Prompt'),
+              onPressed: (_rawFetchedYaml == null || _parsedYamlMap == null) // Fetch mode
+                  ? _handleFetchOrGenerate 
+                  : (_promptController.text.isNotEmpty // Generate mode: prompt must not be empty
+                      ? _handleFetchOrGenerate 
+                      : null), // Disable if in generate mode and prompt is empty
+              child: Text(_rawFetchedYaml == null || _parsedYamlMap == null ? 'Fetch YAML' : 'Generate from Prompt'),
             ),
             SizedBox(height: 20),
             Expanded(
