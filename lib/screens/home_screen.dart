@@ -76,11 +76,18 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (response.statusCode == 200) {
+        final String responseBody = response.body;
+        print('DEBUG_LOG: API Raw Response Body (first 1000 chars): ${responseBody.substring(0, responseBody.length > 1000 ? 1000 : responseBody.length)}');
+
         try {
           // 1. Parse JSON Response
-          Map<String, dynamic> jsonResponse;
+          Map<String, dynamic>? jsonResponse; // Allow for null if parsing fails or type is wrong
+          dynamic parsedJsonData; // To store the result of jsonDecode
           try {
-            jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
+            parsedJsonData = jsonDecode(responseBody);
+            if (parsedJsonData is Map<String, dynamic>) {
+              jsonResponse = parsedJsonData;
+            }
           } on FormatException catch (e) {
             setState(() {
               _generatedYamlMessage = 'Error: API response is not valid JSON.\nDetails: $e';
@@ -90,76 +97,89 @@ class _HomeScreenState extends State<HomeScreen> {
             return;
           }
 
-          // 2. Extract and Decode Base64 String
-          if (!jsonResponse.containsKey('project_yaml_bytes')) {
-            setState(() {
-              _generatedYamlMessage = "Error: Unexpected API response structure (missing 'project_yaml_bytes' key).";
-              _rawFetchedYaml = null;
-            });
-            return;
-          }
-          
-          final base64String = jsonResponse['project_yaml_bytes'];
-          if (base64String is! String) {
-             setState(() {
-              _generatedYamlMessage = "Error: Unexpected API response data type for 'project_yaml_bytes' (expected String).";
-              _rawFetchedYaml = null;
-            });
-            return;
-          }
+          print('DEBUG_LOG: Parsed JSON type: ${parsedJsonData.runtimeType}');
 
-          List<int> zipBytes;
-          try {
-            zipBytes = base64Decode(base64String);
-          } on FormatException catch (e) {
-            setState(() {
-              _generatedYamlMessage = 'Error: Failed to decode YAML data from API response (Base64 decoding failed).\nDetails: $e';
-              _rawFetchedYaml = null;
-            });
-            print('Base64 Decoding Error: $e');
-            return;
-          }
-
-          // 3. Process ZIP Bytes (existing logic moved inside this try block)
-          final archive = ZipDecoder().decodeBytes(zipBytes, verify: true); // Use zipBytes here
-
-          ArchiveFile? yamlFile;
-          for (final file in archive.files) {
-            if (file.name == 'project.yaml' && file.isFile) {
-              yamlFile = file;
-              break;
+          if (jsonResponse != null) {
+            final String? projectYamlBytesString = jsonResponse['project_yaml_bytes'] as String?;
+            if (projectYamlBytesString != null) {
+              print('DEBUG_LOG: Extracted project_yaml_bytes string length: ${projectYamlBytesString.length}');
+              print('DEBUG_LOG: Extracted project_yaml_bytes string snippet (first 100 chars): ${projectYamlBytesString.substring(0, projectYamlBytesString.length > 100 ? 100 : projectYamlBytesString.length)}');
+            } else {
+              print('DEBUG_LOG: project_yaml_bytes key not found or not a string.');
+              setState(() {
+                _generatedYamlMessage = "Error: API response missing 'project_yaml_bytes' or it's not a string.";
+                _rawFetchedYaml = null;
+              });
+              return;
             }
-          }
-          if (yamlFile == null) {
+
+            // 2. Extract and Decode Base64 String (using projectYamlBytesString)
+            List<int> decodedZipBytes;
+            try {
+              decodedZipBytes = base64Decode(projectYamlBytesString); // Use the extracted and validated string
+            } on FormatException catch (e) {
+              setState(() {
+                _generatedYamlMessage = 'Error: Failed to decode YAML data from API response (Base64 decoding failed).\nDetails: $e';
+                _rawFetchedYaml = null;
+              });
+              print('Base64 Decoding Error: $e');
+              return;
+            }
+            
+            print('DEBUG_LOG: Decoded ZIP Bytes Length: ${decodedZipBytes.length}');
+            List<int> snippet = decodedZipBytes.take(32).toList();
+            print('DEBUG_LOG: Decoded ZIP Bytes Snippet (Hex, first 32 bytes): ${_bytesToHexString(snippet)}');
+            
+            // 3. Process ZIP Bytes (existing logic moved inside this try block)
+            final archive = ZipDecoder().decodeBytes(decodedZipBytes, verify: true); // Use decodedZipBytes here
+
+            ArchiveFile? yamlFile;
             for (final file in archive.files) {
-              if (file.name.endsWith('.yaml') && file.isFile) {
+              if (file.name == 'project.yaml' && file.isFile) {
                 yamlFile = file;
                 break;
               }
             }
-          }
-
-          if (yamlFile != null) {
-            final fileData = yamlFile.content as List<int>;
-            _rawFetchedYaml = utf8.decode(fileData, allowMalformed: true); 
-            
-            if (_rawFetchedYaml == null || _rawFetchedYaml!.trim().isEmpty) {
-              setState(() {
-                _generatedYamlMessage = 'Error: Extracted YAML file is empty or contains only whitespace.';
-                _rawFetchedYaml = null; 
-              });
-            } else {
-              _parseFetchedYaml(); 
+            if (yamlFile == null) {
+              for (final file in archive.files) {
+                if (file.name.endsWith('.yaml') && file.isFile) {
+                  yamlFile = file;
+                  break;
+                }
+              }
             }
-          } else {
+
+            if (yamlFile != null) {
+              final fileData = yamlFile.content as List<int>;
+              _rawFetchedYaml = utf8.decode(fileData, allowMalformed: true); 
+              
+              if (_rawFetchedYaml == null || _rawFetchedYaml!.trim().isEmpty) {
+                setState(() {
+                  _generatedYamlMessage = 'Error: Extracted YAML file is empty or contains only whitespace.';
+                  _rawFetchedYaml = null; 
+                });
+              } else {
+                _parseFetchedYaml(); 
+              }
+            } else {
+              setState(() {
+                _generatedYamlMessage = 'Error: No ".yaml" file (e.g., project.yaml) found in the downloaded ZIP archive.';
+                _rawFetchedYaml = null;
+              });
+            }
+          } else { // If jsonResponse is null (parsedJsonData was not a Map<String, dynamic>)
+            print('DEBUG_LOG: Parsed JSON is not a Map.');
             setState(() {
-              _generatedYamlMessage = 'Error: No ".yaml" file (e.g., project.yaml) found in the downloaded ZIP archive.';
+              _generatedYamlMessage = 'Error: API response format is not a valid JSON object.';
               _rawFetchedYaml = null;
             });
+            return;
           }
         } on ArchiveException catch (e) {
           setState(() {
             _generatedYamlMessage = 'Error: Received corrupted or invalid YAML package (ZIP archive).\nDetails: $e';
+              _rawFetchedYaml = null;
+            });
             _rawFetchedYaml = null;
           });
           print('ArchiveException: $e');
