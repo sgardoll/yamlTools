@@ -34,6 +34,12 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOutputExpanded = false; // For expandable output section
   bool _hasModifications = false; // Track if modifications have been made
 
+  // Track which files are expanded
+  Set<String> _expandedFiles = {};
+
+  // Add filter option to hide detailed files
+  bool _showDetailedFiles = false;
+
   final _projectIdController = TextEditingController();
   final _apiTokenController = TextEditingController();
   final _promptController = TextEditingController();
@@ -172,6 +178,45 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  // Helper to auto-expand important files
+  void _autoExpandImportantFiles() {
+    _expandedFiles.clear();
+
+    // Always expand the combined file if it exists
+    if (_exportedFiles.containsKey('ALL_CONTENT_COMBINED.yaml')) {
+      _expandedFiles.add('ALL_CONTENT_COMBINED.yaml');
+      print(
+          'DEBUG: Auto-expanded ALL_CONTENT_COMBINED.yaml with ${_exportedFiles['ALL_CONTENT_COMBINED.yaml']?.length ?? 0} chars');
+    }
+
+    // And also expand complete_raw.yaml
+    if (_exportedFiles.containsKey('complete_raw.yaml')) {
+      _expandedFiles.add('complete_raw.yaml');
+    }
+
+    // Find the largest archive files to expand
+    List<MapEntry<String, String>> archiveEntries = _exportedFiles.entries
+        .where((entry) => entry.key.startsWith('archive_'))
+        .toList();
+
+    // Sort by content length (largest first)
+    archiveEntries.sort((a, b) => b.value.length.compareTo(a.value.length));
+
+    // Only expand the largest 1-2 archive files
+    List<String> largestFiles =
+        archiveEntries.take(2).map((entry) => entry.key).toList();
+
+    if (largestFiles.isNotEmpty) {
+      _expandedFiles.addAll(largestFiles);
+      print(
+          'DEBUG: Auto-expanded ${largestFiles.length} largest archive files:');
+      for (String fileName in largestFiles) {
+        print(
+            'DEBUG: - $fileName (${_exportedFiles[fileName]?.length ?? 0} chars)');
+      }
+    }
+  }
+
   Future<void> _fetchProjectYaml() async {
     final projectId = _projectIdController.text;
     final apiToken = _apiTokenController.text;
@@ -192,6 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _originalFiles.clear();
       _changedFiles.clear();
       _hasModifications = false; // Reset modification state for fresh fetch
+      _expandedFiles.clear(); // Clear expanded files state
     });
 
     // Declare decodedZipBytes at a higher scope level
@@ -351,11 +397,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   // Store the raw content directly
                   _exportedFiles['archive_${file.name}'] = fileContent;
 
-                  // If this is a YAML file, also try to save it as our main raw file
-                  if (file.name.endsWith('.yaml')) {
+                  // Keep track of the largest YAML file to use as our main content
+                  if (file.name.endsWith('.yaml') &&
+                      ((_rawFetchedYaml == null) ||
+                          (fileContent.length > _rawFetchedYaml!.length))) {
                     _rawFetchedYaml = fileContent;
                     print(
-                        'DEBUG: Extracted YAML from archive: ${file.name} (${fileContent.length} chars)');
+                        'DEBUG: Using larger YAML from archive: ${file.name} (${fileContent.length} chars)');
                   }
                 } catch (e) {
                   print('DEBUG: Error extracting file ${file.name}: $e');
@@ -512,6 +560,9 @@ class _HomeScreenState extends State<HomeScreen> {
             setState(() {
               _generatedYamlMessage = 'Fetched Project YAML:\n\n$yamlString';
             });
+
+            // Now that we've successfully parsed the YAML, auto-expand important files
+            _autoExpandImportantFiles();
           } catch (e) {
             print('DEBUG: Error generating YAML string: $e');
             setState(() {
@@ -1187,18 +1238,69 @@ class _HomeScreenState extends State<HomeScreen> {
       print('DEBUG: Available file: $fileName (${content.length} chars)');
     }
 
+    // Find the largest file for the quick copy button
+    String largestFileName = "";
+    int largestFileSize = 0;
+
+    for (var fileName in orderedKeys) {
+      String content = filesToShow[fileName] ?? '';
+      if (content.length > largestFileSize) {
+        largestFileSize = content.length;
+        largestFileName = fileName;
+      }
+    }
+
+    String statusMessage = "Found ${orderedKeys.length} files";
+    if (largestFileSize > 0) {
+      statusMessage += " (largest: ${largestFileSize} chars)";
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-            _hasModifications
-                ? 'Changed Files'
-                : 'Export Files - Archive Files in Green',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        SizedBox(height: 4),
-        Text(
-            '💡 Use "Copy ARCHIVE Content" buttons on green files to get complete YAML',
-            style: TextStyle(color: Colors.green[800], fontSize: 12)),
+        Row(
+          children: [
+            Text(_hasModifications ? 'Changed Files' : 'Export Files',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            SizedBox(width: 8),
+            Text(statusMessage,
+                style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            Spacer(),
+            Row(
+              children: [
+                Text('Show Detailed Files:', style: TextStyle(fontSize: 12)),
+                Switch(
+                  value: _showDetailedFiles,
+                  onChanged: (value) {
+                    setState(() {
+                      _showDetailedFiles = value;
+                    });
+                  },
+                  activeColor: Colors.green,
+                ),
+                SizedBox(width: 8),
+                if (largestFileSize > 0)
+                  ElevatedButton.icon(
+                    icon: Icon(Icons.file_copy, size: 14),
+                    label: Text('Copy Largest File',
+                        style: TextStyle(fontSize: 12)),
+                    onPressed: () {
+                      String content = filesToShow[largestFileName] ?? '';
+                      if (content.isNotEmpty) {
+                        _fallbackClipboardCopy(
+                            context, largestFileName, content);
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      backgroundColor: Colors.deepPurple,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+        SizedBox(height: 8),
         Expanded(
           child: filesToShow.isEmpty
               ? Center(
@@ -1209,7 +1311,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemCount: orderedKeys.length,
                   itemBuilder: (context, index) {
                     String fileName = orderedKeys[index];
+
+                    // Skip detailed files if filter is enabled
+                    if (!_showDetailedFiles) {
+                      // Skip deeply nested files but keep important ones
+                      if (fileName.startsWith('archive_') &&
+                          !fileName.contains('ALL_CONTENT_COMBINED') &&
+                          fileName.contains('/') &&
+                          fileName.split('/').length > 3) {
+                        return SizedBox.shrink(); // Invisible widget
+                      }
+                    }
+
                     String fileContent = filesToShow[fileName] ?? '';
+                    bool isExpanded = _expandedFiles.contains(fileName);
 
                     // Debug file sizes
                     print(
@@ -1220,7 +1335,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         "# This file was removed in the latest changes";
 
                     // Highlight the complete raw file
-                    bool isCompleteRaw = fileName.contains('complete_raw.yaml');
+                    bool isCompleteRaw =
+                        fileName.contains('complete_raw.yaml') ||
+                            fileName.contains('ALL_CONTENT_COMBINED');
 
                     // Highlight archive files
                     bool isArchiveFile = fileName.startsWith('archive_');
@@ -1234,106 +1351,177 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(fileName,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: isDeleted
-                                          ? Colors.red
-                                          : (isArchiveFile
+                          InkWell(
+                            onTap: () {
+                              setState(() {
+                                if (isExpanded) {
+                                  _expandedFiles.remove(fileName);
+                                } else {
+                                  _expandedFiles.add(fileName);
+                                }
+                              });
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          isExpanded
+                                              ? Icons.expand_less
+                                              : Icons.expand_more,
+                                          color: isArchiveFile
                                               ? Colors.green[800]
                                               : (isCompleteRaw
                                                   ? Colors.blue[800]
-                                                  : null)),
-                                    )),
-                                ElevatedButton.icon(
-                                  icon: Icon(Icons.copy, size: 16),
-                                  label: Text(isArchiveFile
-                                      ? 'Copy ARCHIVE Content'
-                                      : (isCompleteRaw
-                                          ? 'Copy COMPLETE Content'
-                                          : 'Copy Full Content')),
-                                  onPressed: () {
-                                    // Log length for debugging
-                                    print(
-                                        'DEBUG: Copying file "$fileName" with content length: ${fileContent.length}');
-                                    print(
-                                        'DEBUG: First 100 chars of content: ${fileContent.substring(0, fileContent.length > 100 ? 100 : fileContent.length)}');
-                                    print(
-                                        'DEBUG: Last 100 chars of content: ${fileContent.substring(fileContent.length > 100 ? fileContent.length - 100 : 0)}');
-
-                                    // For web, try to use a more direct approach
-                                    if (kIsWeb) {
-                                      try {
-                                        // Directly use web APIs for larger content
-                                        web.window.navigator.clipboard
-                                            ?.writeText(fileContent)
-                                            .then((_) {
-                                          print(
-                                              'DEBUG: Web clipboard API used successfully');
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                  '$fileName copied to clipboard (${fileContent.length} chars)'),
-                                              duration: Duration(seconds: 2),
+                                                  : null),
+                                        ),
+                                        SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            isArchiveFile
+                                                ? fileName.replaceFirst(
+                                                    'archive_', '')
+                                                : fileName,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: isDeleted
+                                                  ? Colors.red
+                                                  : (isArchiveFile
+                                                      ? Colors.green[800]
+                                                      : (isCompleteRaw
+                                                          ? Colors.blue[800]
+                                                          : null)),
                                             ),
-                                          );
-                                        }).catchError((error) {
-                                          print(
-                                              'DEBUG: Web clipboard API error: $error');
-                                          // Fall back to Flutter's method
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        Text(
+                                          ' (${fileContent.length} chars)',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (isArchiveFile || isCompleteRaw)
+                                    ElevatedButton.icon(
+                                      icon: Icon(Icons.copy, size: 16),
+                                      label: Text('Copy Content'),
+                                      onPressed: () {
+                                        // Log length for debugging
+                                        print(
+                                            'DEBUG: Copying file "$fileName" with content length: ${fileContent.length}');
+                                        print(
+                                            'DEBUG: First 100 chars of content: ${fileContent.substring(0, fileContent.length > 100 ? 100 : fileContent.length)}');
+                                        print(
+                                            'DEBUG: Last 100 chars of content: ${fileContent.substring(fileContent.length > 100 ? fileContent.length - 100 : 0)}');
+
+                                        // For web, try to use a more direct approach
+                                        if (kIsWeb) {
+                                          try {
+                                            // Directly use web APIs for larger content
+                                            web.window.navigator.clipboard
+                                                ?.writeText(fileContent)
+                                                .then((_) {
+                                              print(
+                                                  'DEBUG: Web clipboard API used successfully');
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                      '$fileName copied to clipboard (${fileContent.length} chars)'),
+                                                  duration:
+                                                      Duration(seconds: 2),
+                                                ),
+                                              );
+                                            }).catchError((error) {
+                                              print(
+                                                  'DEBUG: Web clipboard API error: $error');
+                                              // Fall back to Flutter's method
+                                              _fallbackClipboardCopy(context,
+                                                  fileName, fileContent);
+                                            });
+                                          } catch (e) {
+                                            print(
+                                                'DEBUG: Web clipboard API exception: $e');
+                                            // Fall back to Flutter's method
+                                            _fallbackClipboardCopy(
+                                                context, fileName, fileContent);
+                                          }
+                                        } else {
+                                          // Use Flutter's method for non-web
                                           _fallbackClipboardCopy(
                                               context, fileName, fileContent);
-                                        });
-                                      } catch (e) {
-                                        print(
-                                            'DEBUG: Web clipboard API exception: $e');
-                                        // Fall back to Flutter's method
-                                        _fallbackClipboardCopy(
-                                            context, fileName, fileContent);
-                                      }
-                                    } else {
-                                      // Use Flutter's method for non-web
-                                      _fallbackClipboardCopy(
-                                          context, fileName, fileContent);
-                                    }
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    padding: EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 4),
-                                    // Use different color for the complete raw file
-                                    backgroundColor: isArchiveFile
-                                        ? Colors.green
-                                        : (isCompleteRaw ? Colors.blue : null),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Divider(height: 1),
-                          Container(
-                            // Increase height for better visibility
-                            height: 300,
-                            padding: EdgeInsets.all(8.0),
-                            color: isDeleted
-                                ? Colors.red[50]
-                                : (isArchiveFile
-                                    ? Colors.green[50]
-                                    : (isCompleteRaw
-                                        ? Colors.blue[50]
-                                        : Colors.grey[200])),
-                            child: SingleChildScrollView(
-                              child: SelectableText(
-                                fileContent,
-                                style: TextStyle(fontFamily: 'monospace'),
+                                        }
+                                      },
+                                      style: ElevatedButton.styleFrom(
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 4),
+                                        // Use different color for the complete raw file
+                                        backgroundColor: isArchiveFile
+                                            ? Colors.green
+                                            : Colors.blue,
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                           ),
+                          if (isExpanded) ...[
+                            Divider(height: 1),
+                            Container(
+                              // More flexible height based on content
+                              constraints: BoxConstraints(
+                                minHeight: 150,
+                                maxHeight: 300,
+                              ),
+                              padding: EdgeInsets.all(8.0),
+                              color: isDeleted
+                                  ? Colors.red[50]
+                                  : (isArchiveFile
+                                      ? Colors.green[50]
+                                      : (isCompleteRaw
+                                          ? Colors.blue[50]
+                                          : Colors.grey[200])),
+                              child: Stack(
+                                children: [
+                                  // Content display with scroll
+                                  SingleChildScrollView(
+                                    child: SelectableText(
+                                      fileContent,
+                                      style: TextStyle(fontFamily: 'monospace'),
+                                    ),
+                                  ),
+                                  // Action overlay in bottom right
+                                  if ((isArchiveFile || isCompleteRaw) &&
+                                      fileContent.length > 1000)
+                                    Positioned(
+                                      bottom: 8,
+                                      right: 8,
+                                      child: FloatingActionButton.small(
+                                        onPressed: () {
+                                          // Use Flutter's method for non-web
+                                          _fallbackClipboardCopy(
+                                              context, fileName, fileContent);
+                                        },
+                                        backgroundColor: isArchiveFile
+                                            ? Colors.green
+                                            : Colors.blue,
+                                        child: Icon(Icons.copy, size: 16),
+                                        tooltip: 'Copy all content',
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     );
@@ -1356,6 +1544,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void _prepareFilesForExport() {
     if (_parsedYamlMap == null) return;
 
+    // First log all original sizes for debugging
+    print('DEBUG: Original export files:');
+    _exportedFiles.forEach((key, value) {
+      print('DEBUG: - $key: ${value.length} chars');
+    });
+
     // Store archive files in a temporary map to preserve them
     Map<String, String> archiveFiles = {};
     _exportedFiles.forEach((key, value) {
@@ -1364,117 +1558,71 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
 
-    // Now clear the export files
+    // Create a combined file with all content
+    StringBuffer combinedContent = StringBuffer();
+    int totalLength = 0;
+    for (var entry in archiveFiles.entries) {
+      combinedContent
+          .writeln('# FILE: ${entry.key} (${entry.value.length} chars)');
+      combinedContent.writeln(entry.value);
+      combinedContent.writeln('#--------------------');
+      totalLength += entry.value.length;
+    }
+
+    // Find the largest file content
+    String largestFileName = '';
+    String largestContent = '';
+    for (var entry in archiveFiles.entries) {
+      if (entry.value.length > largestContent.length) {
+        largestContent = entry.value;
+        largestFileName = entry.key;
+      }
+    }
+
+    print(
+        'DEBUG: Largest archive file is $largestFileName with ${largestContent.length} chars');
+
+    // Now clear the export files (except archive files)
+    Map<String, String> nonArchiveFiles = {};
+    _exportedFiles.forEach((key, value) {
+      if (!key.startsWith('archive_')) {
+        nonArchiveFiles[key] = value;
+      }
+    });
+
     _exportedFiles.clear();
 
-    // Restore archive files
+    // First add back all archive files
     archiveFiles.forEach((key, value) {
       _exportedFiles[key] = value;
     });
 
-    // IMPORTANT: Always include the raw YAML content first
-    if (_rawFetchedYaml != null) {
+    // Add the combined all-in-one file
+    String combinedString = combinedContent.toString();
+    _exportedFiles['ALL_CONTENT_COMBINED.yaml'] = combinedString;
+    print(
+        'DEBUG: Created ALL_CONTENT_COMBINED.yaml with ${combinedString.length} chars');
+
+    // Also make this the "complete_raw.yaml" file
+    _exportedFiles['complete_raw.yaml'] = combinedString;
+
+    // And make the largest individual file the raw_project.yaml
+    if (largestContent.isNotEmpty) {
+      _exportedFiles['raw_project.yaml'] = largestContent;
+      print(
+          'DEBUG: Set raw_project.yaml to largest file content (${largestContent.length} chars)');
+    } else if (_rawFetchedYaml != null) {
       _exportedFiles['raw_project.yaml'] = _rawFetchedYaml!;
-      // Store raw YAML as complete_raw.yaml as well to make it more visible
-      _exportedFiles['complete_raw.yaml'] = _rawFetchedYaml!;
+      print(
+          'DEBUG: Used _rawFetchedYaml for raw_project.yaml (${_rawFetchedYaml!.length} chars)');
     }
 
-    // Instead of one large project.yaml file, split into components
-
-    // Project name and metadata
-    Map<String, dynamic> projectMetadata = {};
-    if (_parsedYamlMap!.containsKey('projectName')) {
-      projectMetadata['projectName'] = _parsedYamlMap!['projectName'];
-    }
-    if (_parsedYamlMap!.containsKey('projectType')) {
-      projectMetadata['projectType'] = _parsedYamlMap!['projectType'];
-    }
-    if (!projectMetadata.isEmpty) {
-      _exportedFiles['project_metadata.yaml'] =
-          _mapToYamlString(projectMetadata);
-    }
-
-    // Extract pages into separate files if they exist
-    if (_parsedYamlMap!.containsKey('pages') &&
-        _parsedYamlMap!['pages'] is List) {
-      List pagesList = _parsedYamlMap!['pages'] as List;
-
-      for (var i = 0; i < pagesList.length; i++) {
-        var page = pagesList[i];
-        if (page is Map && page.containsKey('name')) {
-          String pageName = page['name'].toString();
-          String safeFileName =
-              pageName.replaceAll(RegExp(r'[^\w]'), '_').toLowerCase();
-          _exportedFiles['page_${safeFileName}.yaml'] =
-              _mapToYamlString(Map<String, dynamic>.from(page));
-        }
-      }
-    }
-
-    // Extract theme if it exists
-    if (_parsedYamlMap!.containsKey('theme') &&
-        _parsedYamlMap!['theme'] is Map) {
-      _exportedFiles['theme.yaml'] = _mapToYamlString(
-          Map<String, dynamic>.from(_parsedYamlMap!['theme'] as Map));
-    }
-
-    // Extract app info if it exists
-    if (_parsedYamlMap!.containsKey('appInfo') &&
-        _parsedYamlMap!['appInfo'] is Map) {
-      _exportedFiles['app_info.yaml'] = _mapToYamlString(
-          Map<String, dynamic>.from(_parsedYamlMap!['appInfo'] as Map));
-    }
-
-    // Extract widgets if they exist
-    if (_parsedYamlMap!.containsKey('widgets') &&
-        _parsedYamlMap!['widgets'] is List) {
-      _exportedFiles['widgets.yaml'] =
-          _mapToYamlString({'widgets': _parsedYamlMap!['widgets']});
-    }
-
-    // Extract assets if they exist
-    if (_parsedYamlMap!.containsKey('assets') &&
-        _parsedYamlMap!['assets'] is Map) {
-      _exportedFiles['assets.yaml'] = _mapToYamlString(
-          Map<String, dynamic>.from(_parsedYamlMap!['assets'] as Map));
-    }
-
-    // Extract styles if they exist
-    if (_parsedYamlMap!.containsKey('styles') &&
-        _parsedYamlMap!['styles'] is Map) {
-      _exportedFiles['styles.yaml'] = _mapToYamlString(
-          Map<String, dynamic>.from(_parsedYamlMap!['styles'] as Map));
-    }
-
-    // Extract any other major top-level components
-    _parsedYamlMap!.forEach((key, value) {
-      if (![
-        'projectName',
-        'projectType',
-        'pages',
-        'theme',
-        'appInfo',
-        'widgets',
-        'assets',
-        'styles'
-      ].contains(key)) {
-        if (value is Map || value is List) {
-          String safeFileName =
-              key.replaceAll(RegExp(r'[^\w]'), '_').toLowerCase();
-          _exportedFiles['${safeFileName}.yaml'] =
-              _mapToYamlString({key: value});
-        }
+    // Add back non-archive files
+    nonArchiveFiles.forEach((key, value) {
+      if (key != 'complete_raw.yaml' && key != 'raw_project.yaml') {
+        _exportedFiles[key] = value;
       }
     });
-
-    // Full dump for troubleshooting - always include to ensure all content is available
-    _exportedFiles['full_project.yaml'] = _mapToYamlString(_parsedYamlMap!);
-
-    // Debug the full project file size
-    print(
-        'DEBUG: full_project.yaml content length: ${_exportedFiles['full_project.yaml']?.length}');
-    print(
-        'DEBUG: raw_project.yaml content length: ${_exportedFiles['raw_project.yaml']?.length}');
 
     // If this is the first load, save as original files
     if (_originalFiles.isEmpty && !_hasModifications) {
@@ -1568,6 +1716,9 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _showExportView = true;
     });
+
+    // Auto-expand important files after they're loaded
+    _autoExpandImportantFiles();
   }
 
   // Toggle between export view and normal view
