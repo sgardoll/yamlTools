@@ -5,6 +5,8 @@ import 'package:yaml/yaml.dart';
 import 'package:archive/archive.dart'; // For ZIP file handling
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../storage/preferences_manager.dart';
+import '../widgets/recent_projects_widget.dart';
 
 // Import web-specific functionality with fallback
 // ignore: avoid_web_libraries_in_flutter
@@ -30,9 +32,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, String> _originalFiles =
       {}; // Store original files for comparison
   Map<String, String> _changedFiles = {}; // Store only changed files
+  Map<String, TextEditingController> _fileControllers =
+      {}; // For editing YAML files
+  Map<String, bool> _fileEditModes = {}; // Track which files are in edit mode
+
   bool _showExportView = true; // Default to export view
   bool _isOutputExpanded = false; // For expandable output section
   bool _hasModifications = false; // Track if modifications have been made
+  bool _showRecentProjects = false; // Whether to show recent projects panel
+  bool _collapseCredentials =
+      false; // Whether to collapse credentials after fetch
 
   // Track which files are expanded
   Set<String> _expandedFiles = {};
@@ -43,6 +52,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _projectIdController = TextEditingController();
   final _apiTokenController = TextEditingController();
   final _promptController = TextEditingController();
+
+  // Project name for display in recent projects list
+  String _projectName = "";
 
   // Helper to convert bytes to hex
   String _bytesToHexString(List<int> bytes) {
@@ -168,6 +180,19 @@ class _HomeScreenState extends State<HomeScreen> {
     _projectIdController.addListener(() => setState(() {}));
     _apiTokenController.addListener(() => setState(() {}));
     _promptController.addListener(() => setState(() {}));
+
+    // Load saved API token
+    _loadSavedApiToken();
+  }
+
+  // Load API token from shared preferences
+  Future<void> _loadSavedApiToken() async {
+    final savedApiToken = await PreferencesManager.getApiKey();
+    if (savedApiToken != null && savedApiToken.isNotEmpty) {
+      setState(() {
+        _apiTokenController.text = savedApiToken;
+      });
+    }
   }
 
   @override
@@ -175,7 +200,52 @@ class _HomeScreenState extends State<HomeScreen> {
     _projectIdController.dispose();
     _apiTokenController.dispose();
     _promptController.dispose();
+
+    // Dispose of all file content controllers
+    _fileControllers.forEach((fileName, controller) {
+      controller.dispose();
+    });
+
     super.dispose();
+  }
+
+  // Save API token to shared preferences
+  Future<void> _saveApiToken() async {
+    final apiToken = _apiTokenController.text;
+    if (apiToken.isNotEmpty) {
+      await PreferencesManager.saveApiKey(apiToken);
+    }
+  }
+
+  // Handle selecting a project from recent projects list
+  void _handleProjectSelected(String projectId) {
+    setState(() {
+      _projectIdController.text = projectId;
+      _showRecentProjects = false;
+    });
+  }
+
+  // Apply changes to a file and update modification tracking
+  void _applyFileChanges(String fileName, String newContent) {
+    // Only update if content has actually changed
+    if (_exportedFiles[fileName] != newContent) {
+      setState(() {
+        // If this is first modification, backup the original
+        if (!_originalFiles.containsKey(fileName)) {
+          _originalFiles[fileName] = _exportedFiles[fileName]!;
+        }
+
+        // Update file content
+        _exportedFiles[fileName] = newContent;
+        _changedFiles[fileName] = newContent;
+        _hasModifications = true;
+
+        // Update the message to indicate a manual edit was made
+        _operationMessage = 'File "$fileName" manually edited.';
+        _generatedYamlMessage =
+            '$_operationMessage\n\nThe file has been updated.';
+      });
+    }
   }
 
   // Helper to auto-expand important files
@@ -229,6 +299,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Save API token for future use
+    await _saveApiToken();
+
     setState(() {
       _generatedYamlMessage = 'Fetching YAML...';
       _rawFetchedYaml = null;
@@ -236,8 +309,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _exportedFiles.clear();
       _originalFiles.clear();
       _changedFiles.clear();
+      _fileControllers.clear(); // Clear any existing file editors
+      _fileEditModes.clear();
       _hasModifications = false; // Reset modification state for fresh fetch
       _expandedFiles.clear(); // Clear expanded files state
+      _collapseCredentials = true; // Collapse credentials after fetch
     });
 
     // Declare decodedZipBytes at a higher scope level
@@ -268,6 +344,15 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       if (response.statusCode == 200) {
+        // Save API token and add project to recent projects
+        await _saveApiToken();
+
+        // Try to extract project name from response for better display in recent projects
+        _projectName = 'Project $projectId'; // Default name using ID
+
+        // Add to recent projects
+        await PreferencesManager.addRecentProject(projectId, _projectName);
+
         final String responseBody = response.body;
         print(
             'DEBUG_LOG: API Raw Response Body (first 2000 chars): ${responseBody.substring(0, responseBody.length > 2000 ? 2000 : responseBody.length)}');
@@ -279,6 +364,14 @@ class _HomeScreenState extends State<HomeScreen> {
             parsedJsonData = jsonDecode(responseBody);
             if (parsedJsonData is Map<String, dynamic>) {
               jsonResponse = parsedJsonData;
+
+              // Try to extract a better project name if available in the response
+              if (jsonResponse.containsKey('project_name')) {
+                _projectName = jsonResponse['project_name'] ?? _projectName;
+                // Update the project in recent projects with better name
+                await PreferencesManager.addRecentProject(
+                    projectId, _projectName);
+              }
             }
           } on FormatException catch (e) {
             setState(() {
@@ -1143,35 +1236,164 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Authentication Section
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('FlutterFlow Credentials',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold)),
-                    SizedBox(height: 8),
-                    TextField(
-                        controller: _projectIdController,
-                        decoration: InputDecoration(labelText: 'Project ID')),
-                    TextField(
-                        controller: _apiTokenController,
-                        obscureText: true,
-                        decoration: InputDecoration(labelText: 'API Token')),
-                    SizedBox(height: 12),
-                    ElevatedButton(
-                      onPressed: (!hasYaml && hasCredentials)
-                          ? _fetchProjectYaml
-                          : null,
-                      child: Text('Fetch YAML'),
+            // Recent Projects Panel (conditionally shown)
+            if (_showRecentProjects)
+              Expanded(
+                child: Card(
+                  elevation: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Recent Projects',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                setState(() {
+                                  _showRecentProjects = false;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                        const Divider(),
+                        Expanded(
+                          child: RecentProjectsWidget(
+                            onProjectSelected: _handleProjectSelected,
+                            showHeader: false, // Don't show duplicate header
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
+                ),
+              )
+            else if (_collapseCredentials && hasYaml)
+              // Collapsed Credentials (Small button to expand)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0, vertical: 8.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Icon(Icons.account_circle, color: Colors.blue),
+                            SizedBox(width: 8),
+                            Text(
+                              'Project: ${_projectIdController.text}',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.edit, size: 18),
+                            tooltip: 'Edit credentials',
+                            onPressed: () {
+                              setState(() {
+                                _collapseCredentials = false;
+                              });
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.history, size: 18),
+                            tooltip: 'Recent projects',
+                            onPressed: () {
+                              setState(() {
+                                _showRecentProjects = true;
+                              });
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.refresh, size: 18),
+                            tooltip: 'Reload',
+                            onPressed:
+                                hasCredentials ? _fetchProjectYaml : null,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              // Authentication Section (Full form)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('FlutterFlow Credentials',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold)),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.history, size: 16),
+                            label: const Text('Recent'),
+                            style: ElevatedButton.styleFrom(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _showRecentProjects = true;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      TextField(
+                          controller: _projectIdController,
+                          decoration: InputDecoration(labelText: 'Project ID')),
+                      TextField(
+                          controller: _apiTokenController,
+                          obscureText: true,
+                          decoration: InputDecoration(labelText: 'API Token')),
+                      SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed:
+                                  hasCredentials ? _fetchProjectYaml : null,
+                              child: Text('Fetch YAML'),
+                            ),
+                          ),
+                          if (hasYaml) ...[
+                            SizedBox(width: 8),
+                            IconButton(
+                              icon: Icon(Icons.arrow_upward),
+                              tooltip: 'Collapse',
+                              onPressed: () {
+                                setState(() {
+                                  _collapseCredentials = true;
+                                });
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
 
             SizedBox(height: 16),
 
@@ -1322,10 +1544,17 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
 
-    // Debug all file names and sizes
+    // Count modified files for the badge
+    int modifiedFilesCount = 0;
     for (var fileName in orderedKeys) {
       String content = filesToShow[fileName] ?? '';
       print('DEBUG: Available file: $fileName (${content.length} chars)');
+
+      // Check if file is modified
+      if (_originalFiles.containsKey(fileName) &&
+          _originalFiles[fileName] != content) {
+        modifiedFilesCount++;
+      }
     }
 
     // Find the largest file for the quick copy button
@@ -1350,8 +1579,30 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Row(
           children: [
-            Text(_hasModifications ? 'Changed Files' : 'Export Files',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Row(
+              children: [
+                Text(_hasModifications ? 'Changed Files' : 'Export Files',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                if (modifiedFilesCount > 0)
+                  Container(
+                    margin: EdgeInsets.only(left: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.amber,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '$modifiedFilesCount',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             SizedBox(width: 8),
             Text(statusMessage,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600])),
@@ -1432,12 +1683,32 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Highlight archive files
                     bool isArchiveFile = fileName.startsWith('archive_');
 
+                    // Prepare or get a TextEditingController for this file if needed
+                    if (!_fileControllers.containsKey(fileName)) {
+                      _fileControllers[fileName] =
+                          TextEditingController(text: fileContent);
+                    }
+
+                    bool isEditing = _fileEditModes[fileName] == true;
+                    bool wasModified = _originalFiles.containsKey(fileName) &&
+                        _originalFiles[fileName] != fileContent;
+
+                    // Get background color based on file type and modified status
+                    Color? bgColor;
+                    if (isDeleted) {
+                      bgColor = Colors.red[50];
+                    } else if (wasModified) {
+                      bgColor = Colors.amber[50]; // Modified files are amber
+                    } else if (isArchiveFile) {
+                      bgColor = Colors.green[50];
+                    } else if (isCompleteRaw) {
+                      bgColor = Colors.blue[50];
+                    }
+
                     return Card(
                       margin: EdgeInsets.only(bottom: 16),
-                      // Highlight the raw file
-                      color: isArchiveFile
-                          ? Colors.green[50]
-                          : (isCompleteRaw ? Colors.blue[50] : null),
+                      // Highlight based on file type and status
+                      color: bgColor,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -1464,102 +1735,117 @@ class _HomeScreenState extends State<HomeScreen> {
                                           isExpanded
                                               ? Icons.expand_less
                                               : Icons.expand_more,
-                                          color: isArchiveFile
-                                              ? Colors.green[800]
-                                              : (isCompleteRaw
-                                                  ? Colors.blue[800]
-                                                  : null),
+                                          color: wasModified
+                                              ? Colors.amber[800]
+                                              : (isArchiveFile
+                                                  ? Colors.green[800]
+                                                  : (isCompleteRaw
+                                                      ? Colors.blue[800]
+                                                      : null)),
                                         ),
                                         SizedBox(width: 8),
                                         Expanded(
-                                          child: Text(
-                                            isArchiveFile
-                                                ? fileName.replaceFirst(
-                                                    'archive_', '')
-                                                : fileName,
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              color: isDeleted
-                                                  ? Colors.red
-                                                  : (isArchiveFile
-                                                      ? Colors.green[800]
-                                                      : (isCompleteRaw
-                                                          ? Colors.blue[800]
-                                                          : null)),
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        Text(
-                                          ' (${fileContent.length} chars)',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.grey[600],
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  isArchiveFile
+                                                      ? fileName.replaceFirst(
+                                                          'archive_', '')
+                                                      : fileName,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    color: isDeleted
+                                                        ? Colors.red
+                                                        : (wasModified
+                                                            ? Colors.amber[800]
+                                                            : (isArchiveFile
+                                                                ? Colors
+                                                                    .green[800]
+                                                                : (isCompleteRaw
+                                                                    ? Colors
+                                                                        .blue[800]
+                                                                    : null))),
+                                                  ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              Text(
+                                                ' (${fileContent.length} chars)',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey[600],
+                                                ),
+                                              ),
+                                              if (wasModified)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 4.0),
+                                                  child: Icon(
+                                                    Icons.edit_document,
+                                                    size: 16,
+                                                    color: Colors.amber[800],
+                                                  ),
+                                                ),
+                                            ],
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                  if (isArchiveFile || isCompleteRaw)
-                                    ElevatedButton.icon(
-                                      icon: Icon(Icons.copy, size: 16),
-                                      label: Text('Copy Content'),
-                                      onPressed: () {
-                                        // Log length for debugging
-                                        print(
-                                            'DEBUG: Copying file "$fileName" with content length: ${fileContent.length}');
-                                        print(
-                                            'DEBUG: First 100 chars of content: ${fileContent.substring(0, fileContent.length > 100 ? 100 : fileContent.length)}');
-                                        print(
-                                            'DEBUG: Last 100 chars of content: ${fileContent.substring(fileContent.length > 100 ? fileContent.length - 100 : 0)}');
+                                  Row(
+                                    children: [
+                                      // Allow editing for non-archive files
+                                      if (!isArchiveFile && isExpanded)
+                                        IconButton(
+                                          icon: Icon(
+                                            isEditing ? Icons.save : Icons.edit,
+                                            size: 18,
+                                            color:
+                                                isEditing ? Colors.green : null,
+                                          ),
+                                          tooltip: isEditing
+                                              ? 'Save changes'
+                                              : 'Edit file',
+                                          onPressed: () {
+                                            if (isEditing) {
+                                              // Get updated content
+                                              String newContent =
+                                                  _fileControllers[fileName]!
+                                                      .text;
 
-                                        // For web, try to use a more direct approach
-                                        if (kIsWeb) {
-                                          try {
-                                            // Directly use web APIs for larger content
-                                            web.window.navigator.clipboard
-                                                ?.writeText(fileContent)
-                                                .then((_) {
-                                              print(
-                                                  'DEBUG: Web clipboard API used successfully');
-                                              ScaffoldMessenger.of(context)
-                                                  .showSnackBar(
-                                                SnackBar(
-                                                  content: Text(
-                                                      '$fileName copied to clipboard (${fileContent.length} chars)'),
-                                                  duration:
-                                                      Duration(seconds: 2),
-                                                ),
-                                              );
-                                            }).catchError((error) {
-                                              print(
-                                                  'DEBUG: Web clipboard API error: $error');
-                                              // Fall back to Flutter's method
-                                              _fallbackClipboardCopy(context,
-                                                  fileName, fileContent);
-                                            });
-                                          } catch (e) {
-                                            print(
-                                                'DEBUG: Web clipboard API exception: $e');
-                                            // Fall back to Flutter's method
-                                            _fallbackClipboardCopy(
-                                                context, fileName, fileContent);
-                                          }
-                                        } else {
-                                          // Use Flutter's method for non-web
+                                              // Apply changes using our helper method
+                                              _applyFileChanges(
+                                                  fileName, newContent);
+
+                                              // Exit edit mode
+                                              setState(() {
+                                                _fileEditModes[fileName] =
+                                                    false;
+                                              });
+                                            } else {
+                                              // Enter edit mode
+                                              setState(() {
+                                                _fileEditModes[fileName] = true;
+                                                _fileControllers[fileName]!
+                                                    .text = fileContent;
+                                              });
+                                            }
+                                          },
+                                        ),
+                                      // Copy button
+                                      IconButton(
+                                        icon: Icon(Icons.copy, size: 18),
+                                        tooltip: 'Copy content',
+                                        onPressed: () {
                                           _fallbackClipboardCopy(
                                               context, fileName, fileContent);
-                                        }
-                                      },
-                                      style: ElevatedButton.styleFrom(
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 4),
-                                        // Use different color for the complete raw file
-                                        backgroundColor: isArchiveFile
-                                            ? Colors.green
-                                            : Colors.blue,
+                                        },
                                       ),
-                                    ),
+                                    ],
+                                  ),
                                 ],
                               ),
                             ),
@@ -1575,41 +1861,33 @@ class _HomeScreenState extends State<HomeScreen> {
                               padding: EdgeInsets.all(8.0),
                               color: isDeleted
                                   ? Colors.red[50]
-                                  : (isArchiveFile
-                                      ? Colors.green[50]
-                                      : (isCompleteRaw
-                                          ? Colors.blue[50]
-                                          : Colors.grey[200])),
-                              child: Stack(
-                                children: [
-                                  // Content display with scroll
-                                  SingleChildScrollView(
-                                    child: SelectableText(
-                                      fileContent,
-                                      style: TextStyle(fontFamily: 'monospace'),
-                                    ),
-                                  ),
-                                  // Action overlay in bottom right
-                                  if ((isArchiveFile || isCompleteRaw) &&
-                                      fileContent.length > 1000)
-                                    Positioned(
-                                      bottom: 8,
-                                      right: 8,
-                                      child: FloatingActionButton.small(
-                                        onPressed: () {
-                                          // Use Flutter's method for non-web
-                                          _fallbackClipboardCopy(
-                                              context, fileName, fileContent);
-                                        },
-                                        backgroundColor: isArchiveFile
-                                            ? Colors.green
-                                            : Colors.blue,
-                                        child: Icon(Icons.copy, size: 16),
-                                        tooltip: 'Copy all content',
+                                  : (wasModified
+                                      ? Colors.amber[50]
+                                      : (isArchiveFile
+                                          ? Colors.green[50]
+                                          : (isCompleteRaw
+                                              ? Colors.blue[50]
+                                              : Colors.grey[50]))),
+                              child: isEditing
+                                  ? TextField(
+                                      controller: _fileControllers[fileName],
+                                      maxLines: null,
+                                      decoration: InputDecoration(
+                                        border: InputBorder.none,
+                                        hintText: 'Edit YAML content...',
+                                      ),
+                                      style: TextStyle(
+                                        fontFamily: 'monospace',
+                                        fontSize: 14,
+                                      ),
+                                    )
+                                  : SingleChildScrollView(
+                                      child: SelectableText(
+                                        fileContent,
+                                        style:
+                                            TextStyle(fontFamily: 'monospace'),
                                       ),
                                     ),
-                                ],
-                              ),
                             ),
                           ],
                         ],
