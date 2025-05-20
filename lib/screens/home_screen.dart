@@ -9,17 +9,31 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String _prompt = '';
-  String _projectId = '';
-  String _apiToken = '';
+  // TextEditingControllers for TextFields
+  final _promptController = TextEditingController();
+  final _projectIdController = TextEditingController();
+  final _apiTokenController = TextEditingController();
   
   String? _rawFetchedYaml; // To store the raw YAML string from API
   Map<String, dynamic>? _parsedYamlMap; // To store the parsed YAML
   String _generatedYamlMessage = 'Enter Project ID and API Token to fetch YAML.'; // Display messages/results
 
+  @override
+  void dispose() {
+    // Dispose controllers when the widget is removed from the widget tree
+    _promptController.dispose();
+    _projectIdController.dispose();
+    _apiTokenController.dispose();
+    super.dispose();
+  }
+
   // Fetches YAML from the API
   Future<void> _fetchProjectYaml() async {
-    if (_projectId.isEmpty || _apiToken.isEmpty) {
+    // Access text directly from controllers
+    final projectId = _projectIdController.text;
+    final apiToken = _apiTokenController.text;
+
+    if (projectId.isEmpty || apiToken.isEmpty) {
       setState(() {
         _generatedYamlMessage = 'Error: Project ID and API Token cannot be empty.';
       });
@@ -33,11 +47,12 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final Uri uri = Uri.parse('https://api.flutterflow.io/v2/projectYamls?projectId=$_projectId');
+      // Use projectId and apiToken from local variables
+      final Uri uri = Uri.parse('https://api.flutterflow.io/v2/projectYamls?projectId=$projectId');
       final response = await http.get(
         uri,
         headers: {
-          'Authorization': 'Bearer $_apiToken',
+          'Authorization': 'Bearer $apiToken',
           'Content-Type': 'application/json',
         },
       );
@@ -145,7 +160,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       return;
     }
-    if (_prompt.isEmpty) {
+    // Access prompt directly from controller
+    final currentPrompt = _promptController.text;
+    if (currentPrompt.isEmpty) {
       setState(() {
         _generatedYamlMessage = 'Error: Prompt is empty. Please enter a modification instruction.';
       });
@@ -159,7 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Delayed processing to allow UI to update with "Processing prompt..."
     Future.delayed(Duration(milliseconds: 50), () {
-      final promptTrimmed = _prompt.trim();
+      final promptTrimmed = currentPrompt.trim(); // Use currentPrompt
       final promptLc = promptTrimmed.toLowerCase();
       String operationMessage = ""; // To store the primary outcome of the operation
 
@@ -307,31 +324,22 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             TextField(
+              controller: _promptController, // Use controller
               decoration: InputDecoration(labelText: 'Enter your prompt (e.g., Set project name to MyApp)'),
-              onChanged: (value) {
-                setState(() {
-                  _prompt = value;
-                });
-              },
+              // onChanged removed, value accessed via _promptController.text
             ),
             SizedBox(height: 10),
             TextField(
+              controller: _projectIdController, // Use controller
               decoration: InputDecoration(labelText: 'Project ID'),
-              onChanged: (value) {
-                setState(() {
-                  _projectId = value;
-                });
-              },
+              // onChanged removed
             ),
             SizedBox(height: 10),
             TextField(
+              controller: _apiTokenController, // Use controller
               decoration: InputDecoration(labelText: 'API Token'),
               obscureText: true,
-              onChanged: (value) {
-                setState(() {
-                  _apiToken = value;
-                });
-              },
+              // onChanged removed
             ),
             SizedBox(height: 20),
             ElevatedButton(
