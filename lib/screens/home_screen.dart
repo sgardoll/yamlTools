@@ -174,6 +174,15 @@ class _HomeScreenState extends State<HomeScreen> {
           'Content-Type': 'application/json',
         },
       );
+      final String? contentLengthHeader = response.headers['content-length'];
+print('DEBUG_LOG: API Response Header Content-Length: $contentLengthHeader');
+print('DEBUG_LOG: Actual response.bodyBytes.length: ${response.bodyBytes.length}');
+if (contentLengthHeader != null) {
+  final int? parsedContentLength = int.tryParse(contentLengthHeader);
+  if (parsedContentLength != null && parsedContentLength != response.bodyBytes.length) {
+    print('DEBUG_LOG: WARNING - Mismatch between Content-Length header ($parsedContentLength) and actual received bytes (${response.bodyBytes.length}). Possible JSON truncation.');
+  }
+}
 
       if (response.statusCode == 200) {
         final String responseBody = response.body;
