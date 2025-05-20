@@ -189,22 +189,57 @@ class _HomeScreenState extends State<HomeScreen> {
           print('DEBUG_LOG: Parsed JSON type: ${parsedJsonData.runtimeType}');
 
           if (jsonResponse != null) {
-            final String? projectYamlBytesString = jsonResponse['project_yaml_bytes'] as String?;
-            if (projectYamlBytesString != null) {
-              print('DEBUG_LOG: Extracted project_yaml_bytes string length: ${projectYamlBytesString.length}');
-              print('DEBUG_LOG: Extracted project_yaml_bytes string snippet (first 100 chars): ${projectYamlBytesString.substring(0, projectYamlBytesString.length > 100 ? 100 : projectYamlBytesString.length)}');
+            // New (correct) way to access nested key:
+            dynamic valueField = jsonResponse['value'];
+            String? projectYamlBytesString;
+
+            if (valueField is Map<String, dynamic>) {
+              print('DEBUG_LOG: "value" field is a Map.');
+              dynamic projectYamlBytesField = valueField['project_yaml_bytes'];
+              if (projectYamlBytesField is String) {
+                projectYamlBytesString = projectYamlBytesField;
+                print('DEBUG_LOG: Extracted project_yaml_bytes string length: ${projectYamlBytesString.length}');
+                print('DEBUG_LOG: Extracted project_yaml_bytes string snippet (first 100 chars): ${projectYamlBytesString.substring(0, projectYamlBytesString.length > 100 ? 100 : projectYamlBytesString.length)}');
+              } else {
+                print('DEBUG_LOG: project_yaml_bytes key within "value" object is not a String or is null. Actual type: ${projectYamlBytesField?.runtimeType}');
+                if (mounted) { 
+                  setState(() {
+                    _generatedYamlMessage = 'Error: Unexpected data type for project YAML content in API response.';
+                    _rawFetchedYaml = null;
+                  });
+                }
+                return; 
+              }
             } else {
-              print('DEBUG_LOG: project_yaml_bytes key not found or not a string.');
-              setState(() {
-                _generatedYamlMessage = "Error: API response missing 'project_yaml_bytes' or it's not a string.";
-                _rawFetchedYaml = null;
-              });
-              return;
+              print('DEBUG_LOG: "value" key not found in JSON response, or it is not a Map. Actual type: ${valueField?.runtimeType}');
+              if (mounted) { 
+                setState(() {
+                  _generatedYamlMessage = 'Error: Unexpected API response structure (missing or invalid "value" object).';
+                  _rawFetchedYaml = null;
+                });
+              }
+              return; 
             }
 
+            // Proceed only if projectYamlBytesString was successfully extracted and is not empty
+            if (projectYamlBytesString == null || projectYamlBytesString.isEmpty) {
+                 print('DEBUG_LOG: project_yaml_bytes string is null or empty after attempted extraction.');
+                 if (mounted) {
+                    setState(() {
+                        // Avoid overwriting more specific messages if they were already set
+                        if (_generatedYamlMessage.startsWith("Fetching YAML...")) { 
+                           _generatedYamlMessage = "Error: Failed to extract YAML content string from API response.";
+                        }
+                        _rawFetchedYaml = null;
+                    });
+                 }
+                 return;
+            }
+            
+            // 2. Extract and Decode Base64 String (using projectYamlBytesString)
             List<int> decodedZipBytes;
             try {
-              decodedZipBytes = base64Decode(projectYamlBytesString);
+              decodedZipBytes = base64Decode(projectYamlBytesString); // Use the extracted and validated string
             } on FormatException catch (e) {
               setState(() {
                 _generatedYamlMessage = 'Error: Failed to decode YAML data from API response (Base64 decoding failed).\nDetails: $e';
