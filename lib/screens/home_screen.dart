@@ -3,6 +3,14 @@ import 'package:http/http.dart' as http;
 import 'dart:convert'; // For utf8 decoding & JSON
 import 'package:yaml/yaml.dart';
 import 'package:archive/archive.dart'; // For ZIP file handling
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+// Import web-specific functionality with fallback
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as web; // This will only compile on web
+
+// We're not using conditional imports
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -14,8 +22,17 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _rawFetchedYaml;
   Map<String, dynamic>? _parsedYamlMap;
   String _generatedYamlMessage =
-      "Enter Project ID and API Token, then click 'Fetch YAML'. Once YAML is loaded, enter a prompt and click 'Generate from Prompt'."; // Initial message
+      "Enter Project ID and API Token, then click 'Fetch YAML'."; // Initial message
   String _operationMessage = ""; // For status messages like "Page created"
+
+  // Map to store separate YAML files for export
+  Map<String, String> _exportedFiles = {};
+  Map<String, String> _originalFiles =
+      {}; // Store original files for comparison
+  Map<String, String> _changedFiles = {}; // Store only changed files
+  bool _showExportView = true; // Default to export view
+  bool _isOutputExpanded = false; // For expandable output section
+  bool _hasModifications = false; // Track if modifications have been made
 
   final _projectIdController = TextEditingController();
   final _apiTokenController = TextEditingController();
@@ -123,6 +140,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return buffer.toString();
     } else if (node is String) {
+      // For very large strings, log their size to debug possible truncation
+      if (node.length > 1000) {
+        print('DEBUG: Large string value with length ${node.length}');
+      }
       return _escapeStringForYaml(node);
     } else if (node == null) {
       return 'null';
@@ -167,6 +188,10 @@ class _HomeScreenState extends State<HomeScreen> {
       _generatedYamlMessage = 'Fetching YAML...';
       _rawFetchedYaml = null;
       _parsedYamlMap = null;
+      _exportedFiles.clear();
+      _originalFiles.clear();
+      _changedFiles.clear();
+      _hasModifications = false; // Reset modification state for fresh fetch
     });
 
     // Declare decodedZipBytes at a higher scope level
@@ -199,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (response.statusCode == 200) {
         final String responseBody = response.body;
         print(
-            'DEBUG_LOG: API Raw Response Body (first 1000 chars): ${responseBody.substring(0, responseBody.length > 1000 ? 1000 : responseBody.length)}');
+            'DEBUG_LOG: API Raw Response Body (first 2000 chars): ${responseBody.substring(0, responseBody.length > 2000 ? 2000 : responseBody.length)}');
 
         try {
           Map<String, dynamic>? jsonResponse;
@@ -234,7 +259,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 print(
                     'DEBUG_LOG: Extracted project_yaml_bytes string length: ${projectYamlBytesString.length}');
                 print(
-                    'DEBUG_LOG: Extracted project_yaml_bytes string snippet (first 100 chars): ${projectYamlBytesString.substring(0, projectYamlBytesString.length > 100 ? 100 : projectYamlBytesString.length)}');
+                    'DEBUG_LOG: Extracted project_yaml_bytes string snippet (first 500 chars): ${projectYamlBytesString.substring(0, projectYamlBytesString.length > 500 ? 500 : projectYamlBytesString.length)}');
                 print(
                     'DEBUG_LOG: project_yaml_bytes length is multiple of 4: ${projectYamlBytesString.length % 4 == 0}');
                 int paddingChars = 0;
@@ -309,6 +334,36 @@ class _HomeScreenState extends State<HomeScreen> {
             final archive =
                 ZipDecoder().decodeBytes(decodedZipBytes!, verify: true);
 
+            print('DEBUG: Archive contains ${archive.files.length} files');
+
+            // Direct approach: extract ALL files from the archive
+            for (final file in archive.files) {
+              if (file.isFile) {
+                print(
+                    'DEBUG: Found file in archive: ${file.name} (${file.size} bytes)');
+
+                try {
+                  // Extract and decode the file content
+                  final fileData = file.content as List<int>;
+                  final fileContent =
+                      utf8.decode(fileData, allowMalformed: true);
+
+                  // Store the raw content directly
+                  _exportedFiles['archive_${file.name}'] = fileContent;
+
+                  // If this is a YAML file, also try to save it as our main raw file
+                  if (file.name.endsWith('.yaml')) {
+                    _rawFetchedYaml = fileContent;
+                    print(
+                        'DEBUG: Extracted YAML from archive: ${file.name} (${fileContent.length} chars)');
+                  }
+                } catch (e) {
+                  print('DEBUG: Error extracting file ${file.name}: $e');
+                }
+              }
+            }
+
+            // Find a YAML file if we haven't already
             ArchiveFile? yamlFile;
             for (final file in archive.files) {
               if (file.name == 'project.yaml' && file.isFile) {
@@ -328,6 +383,8 @@ class _HomeScreenState extends State<HomeScreen> {
             if (yamlFile != null) {
               final fileData = yamlFile.content as List<int>;
               _rawFetchedYaml = utf8.decode(fileData, allowMalformed: true);
+              print(
+                  'DEBUG: Original raw YAML file size: ${_rawFetchedYaml?.length ?? 0} chars');
 
               if (_rawFetchedYaml == null || _rawFetchedYaml!.trim().isEmpty) {
                 setState(() {
@@ -336,6 +393,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   _rawFetchedYaml = null;
                 });
               } else {
+                // Store the raw YAML directly - don't rely on parsing
+                _exportedFiles['complete_raw.yaml'] = _rawFetchedYaml!;
                 _parseFetchedYaml();
               }
             } else {
@@ -419,6 +478,11 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       print('Exception caught during YAML fetch: $e');
     }
+
+    // Add a call to prepare files for export after successful fetch
+    if (_parsedYamlMap != null) {
+      _prepareFilesForExport();
+    }
   }
 
   void _parseFetchedYaml() {
@@ -426,14 +490,35 @@ class _HomeScreenState extends State<HomeScreen> {
       _generatedYamlMessage = 'Parsing YAML...';
     });
     try {
+      print(
+          'DEBUG: Raw YAML length before parsing: ${_rawFetchedYaml?.length}');
+
       var loadedData = loadYaml(_rawFetchedYaml!);
+      print('DEBUG: Loaded YAML type: ${loadedData.runtimeType}');
+
       if (loadedData is YamlMap) {
         _parsedYamlMap = _convertYamlNode(loadedData) as Map<String, dynamic>?;
+        print(
+            'DEBUG: Parsed YAML into map with ${_parsedYamlMap?.length} top-level keys');
+
         if (_parsedYamlMap != null) {
-          final yamlString = _mapToYamlString(_parsedYamlMap!);
-          setState(() {
-            _generatedYamlMessage = 'Fetched Project YAML:\n\n$yamlString';
-          });
+          // Log the top-level keys for debugging
+          print('DEBUG: Top-level keys: ${_parsedYamlMap!.keys.join(', ')}');
+
+          // Try to generate a string version
+          try {
+            final yamlString = _mapToYamlString(_parsedYamlMap!);
+            print('DEBUG: Generated YAML string length: ${yamlString.length}');
+            setState(() {
+              _generatedYamlMessage = 'Fetched Project YAML:\n\n$yamlString';
+            });
+          } catch (e) {
+            print('DEBUG: Error generating YAML string: $e');
+            setState(() {
+              _generatedYamlMessage =
+                  'Successfully parsed YAML but encountered an error displaying it.\nThe files will still be available for export.';
+            });
+          }
         } else {
           _parsedYamlMap = null;
           setState(() {
@@ -485,204 +570,399 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _generatedYamlMessage = 'Processing prompt...';
       _operationMessage = ''; // Reset operation message
+      _hasModifications =
+          true; // Set flag to indicate modifications are being made
     });
 
     Future.delayed(Duration(milliseconds: 50), () {
+      final promptTrimmed = currentPrompt.trim().toLowerCase();
+
+      // Store a copy of the original YAML map before modifications if not already stored
+      if (_originalFiles.isEmpty) {
+        _prepareFilesForExport(); // This will initialize _originalFiles
+      }
+
+      // Use string manipulation instead of RegExp for better reliability
+      bool isSetProjectName = promptTrimmed.startsWith('set project name to');
+      bool isCreatePage = promptTrimmed.startsWith('create page') ||
+          promptTrimmed.startsWith('add page');
+      bool isSetBgColor = promptTrimmed.contains('background color') &&
+          promptTrimmed.contains(' to ');
+
+      // New command types
+      bool isDeletePage = promptTrimmed.startsWith('delete page') ||
+          promptTrimmed.startsWith('remove page');
+      bool isAddWidget = promptTrimmed.startsWith('add widget') &&
+          promptTrimmed.contains(' to page ');
+      bool isSetThemeColor = promptTrimmed.startsWith('set theme color') &&
+          promptTrimmed.contains(' to ');
+      bool isSetAppTitle = promptTrimmed.startsWith('set app title to');
+
       _parsedYamlMap =
           Map<String, dynamic>.from(_parsedYamlMap!); // Ensure mutable
 
-      final parsedCommand = _parseCommand(currentPrompt);
+      if (isSetProjectName) {
+        final newName =
+            promptTrimmed.substring('set project name to'.length).trim();
+        if (newName.isEmpty) {
+          _operationMessage = 'Error: New project name cannot be empty.';
+        } else {
+          _parsedYamlMap!['projectName'] = newName;
+          _operationMessage = 'Project name set to "$newName".';
+        }
+      } else if (isCreatePage) {
+        String pageName = '';
+        if (promptTrimmed.startsWith('create page')) {
+          pageName = promptTrimmed.substring('create page'.length).trim();
+        } else {
+          // add page
+          pageName = promptTrimmed.substring('add page'.length).trim();
+        }
 
-      if (parsedCommand['action'] == 'ERROR') {
-        _operationMessage = parsedCommand['message'] ?? 'Error: Unknown command parsing error.';
-      } else {
-        final action = parsedCommand['action'] as String;
-        final targetType = parsedCommand['targetType'] as String?;
-        final targetName = parsedCommand['targetName'] as String?;
-        final value = parsedCommand['value'];
-        final options = parsedCommand['options'] as Map<String, dynamic>?;
+        // Remove quotes if present
+        if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
+            (pageName.startsWith('"') && pageName.endsWith('"'))) {
+          pageName = pageName.substring(1, pageName.length - 1);
+        }
 
-        switch (action) {
-          case 'SET':
-            if (targetType == 'PROJECT_PROPERTY' && targetName == 'projectName') {
-              if (value is String && value.isNotEmpty) {
-                _parsedYamlMap!['projectName'] = value;
-                _operationMessage = 'Project name set to "$value".';
+        if (pageName.isEmpty) {
+          _operationMessage = 'Error: Page name cannot be empty for creation.';
+        } else {
+          if (!_parsedYamlMap!.containsKey('pages')) {
+            _parsedYamlMap!['pages'] = [];
+          }
+          var pagesEntry = _parsedYamlMap!['pages'];
+          if (pagesEntry is! List) {
+            _operationMessage =
+                "Error: 'pages' entry exists but is not a list. Cannot add page.";
+          } else {
+            List<Map<String, dynamic>> typedPagesList = [];
+            bool conversionSuccess = true;
+            for (var item in pagesEntry) {
+              if (item is Map) {
+                typedPagesList.add(Map<String, dynamic>.from(item));
               } else {
-                _operationMessage = 'Error: New project name cannot be empty.';
-              }
-            } else if (targetType == 'PAGE_PROPERTY' && targetName != null && options != null) {
-              final pageName = targetName; // Already unquoted by _parseCommand
-              final propertyToSet = options['property'] as String?;
-              final propertyValue = options['value']; // Already unquoted by _parseCommand
-
-              if (propertyToSet == null || propertyValue == null) {
-                  _operationMessage = 'Error: Invalid property settings for page.';
-                  break;
-              }
-
-              if (!_parsedYamlMap!.containsKey('pages') || _parsedYamlMap!['pages'] is! List || (_parsedYamlMap!['pages'] as List).isEmpty) {
-                _operationMessage = 'Error: No pages found or "pages" is not a valid list. Cannot set $propertyToSet.';
-              } else {
-                var pagesList = _parsedYamlMap!['pages'] as List;
-                int pageIndex = -1;
-                Map<String, dynamic>? pageToUpdateData;
-
-                for (int i = 0; i < pagesList.length; i++) {
-                  var page = pagesList[i];
-                  if (page is Map && page.containsKey('name') && page['name']?.toString().toLowerCase() == pageName.toLowerCase()) {
-                    pageToUpdateData = Map<String, dynamic>.from(page);
-                    pageIndex = i;
-                    break;
-                  }
-                }
-
-                if (pageToUpdateData != null && pageIndex != -1) {
-                  pageToUpdateData[propertyToSet] = propertyValue;
-                  pagesList[pageIndex] = pageToUpdateData;
-                  _parsedYamlMap!['pages'] = pagesList;
-                  _operationMessage = '$propertyToSet of page "$pageName" set to "$propertyValue".';
-                } else {
-                  _operationMessage = 'Error: Page named "$pageName" not found.';
-                }
-              }
-            } else if (targetType == 'THEME_COLOR' && targetName != null && value is String) {
-              final colorName = targetName; // Already lowercased and unquoted by _parseCommand
-              final hexValue = value; // Already unquoted by _parseCommand
-
-              _parsedYamlMap!['theme'] ??= <String, dynamic>{};
-              var themeMap = _parsedYamlMap!['theme'] as Map<String, dynamic>;
-              themeMap['colors'] ??= <String, dynamic>{};
-              var colorsMap = themeMap['colors'] as Map<String, dynamic>;
-
-              colorsMap[colorName] = hexValue;
-              _operationMessage = 'Theme color "$colorName" set to "$hexValue".';
-            } else {
-              _operationMessage = 'Error: Unrecognized "SET" command structure.';
-            }
-            break;
-          case 'CREATE':
-            if (targetType == 'PAGE' && targetName != null && targetName.isNotEmpty) {
-              final pageName = targetName; // Already unquoted by _parseCommand
-              if (!_parsedYamlMap!.containsKey('pages')) {
-                _parsedYamlMap!['pages'] = <Map<String, dynamic>>[];
-              }
-              var pagesEntry = _parsedYamlMap!['pages'];
-
-              if (pagesEntry is! List) {
-                _operationMessage = "Error: 'pages' entry exists but is not a list. Cannot add page.";
-              } else {
-                List<Map<String, dynamic>> typedPagesList = [];
-                for (var item in pagesEntry) {
-                  if (item is Map) {
-                    typedPagesList.add(Map<String, dynamic>.from(item));
-                  } else {
-                     _operationMessage = "Error: 'pages' list contains non-map elements. Cannot reliably add page.";
-                     // To prevent further errors, we stop processing this command.
-                     // Consider logging this state or providing a way to fix it.
-                     return; 
-                  }
-                }
-                _parsedYamlMap!['pages'] = typedPagesList; 
-                bool pageExists = typedPagesList.any((p) => p['name']?.toString().toLowerCase() == pageName.toLowerCase());
-
-                if (pageExists) {
-                  _operationMessage = 'Error: Page named "$pageName" already exists.';
-                } else {
-                  typedPagesList.add({
-                    'name': pageName,
-                    'widgets': [], 
-                    'backgroundColor': '#FFFFFF' 
-                  });
-                  _parsedYamlMap!['pages'] = typedPagesList;
-                  _operationMessage = 'Page "$pageName" created successfully.';
-                }
-              }
-            } else {
-              _operationMessage = 'Error: Unrecognized "CREATE" command structure or missing page name.';
-            }
-            break;
-          case 'ADD':
-            if (targetType == 'APPBAR_TO_PAGE' && targetName != null && options != null) {
-              final pageName = targetName; // Already unquoted by _parseCommand
-              final templateName = options['template_name'] as String?; // Already unquoted and lowercased by _parseCommand
-              final titleText = options['title_text'] as String?; // Already unquoted by _parseCommand
-
-              if (!_parsedYamlMap!.containsKey('pages') || _parsedYamlMap!['pages'] is! List) {
-                _operationMessage = 'Error: No pages list found or "pages" is not a list. Cannot add AppBar.';
+                conversionSuccess = false;
                 break;
               }
-              var pagesList = _parsedYamlMap!['pages'] as List;
-              int pageIndex = -1;
-              Map<String, dynamic>? pageToUpdateData;
-
-              for (int i = 0; i < pagesList.length; i++) {
-                var page = pagesList[i];
-                if (page is Map && page.containsKey('name') && page['name']?.toString().toLowerCase() == pageName.toLowerCase()) {
-                  pageToUpdateData = Map<String, dynamic>.from(page);
-                  pageIndex = i;
-                  break;
-                }
-              }
-
-              if (pageToUpdateData != null && pageIndex != -1) {
-                Map<String, dynamic> newAppBar = {};
-                if (templateName == 'large_header') { // Already lowercased
-                  newAppBar = {
-                    'templateType': 'LARGE_HEADER',
-                    'backgroundColor': {'themeColor': 'PRIMARY'},
-                    'elevation': 2,
-                    'defaultIcon': {
-                      'sizeValue': {'inputValue': 30},
-                      'colorValue': {'inputValue': {'value': '4294967295'}}, // White
-                      'iconDataValue': {
-                        'inputValue': {
-                          'codePoint': 62834,
-                          'family': 'MaterialIcons',
-                          'matchTextDirection': true,
-                          'name': 'arrow_back_rounded'
-                        }
-                      }
-                    },
-                    'textStyle': {
-                      'themeStyle': 'HEADLINE_MEDIUM',
-                      'fontSizeValue': {'inputValue': 22},
-                      'colorValue': {'inputValue': {'value': '4294967295'}} // White
-                    }
-                  };
-                  // For LARGE_HEADER, an explicit title (if provided) takes precedence or can be set in its own field.
-                  // FlutterFlow's actual behavior for title within LARGE_HEADER might involve specific fields in textStyle or a main title field.
-                  // Here, we add/override a 'title' field for clarity if titleText is provided.
-                  if (titleText != null && titleText.isNotEmpty) {
-                     newAppBar['title'] = {'text': titleText};
-                  } else if (!newAppBar.containsKey('title')){ // Add a default title if none from prompt and template doesn't set one
-                     newAppBar['title'] = {'text': 'Title'}; // Default title for LARGE_HEADER
-                  }
-                } else { // Default or unknown template
-                  newAppBar['backgroundColor'] = {'themeColor': 'PRIMARY'};
-                  newAppBar['title'] = {'text': titleText ?? 'App Bar'}; // Use provided title or a generic default
-                }
-                
-                // If an explicit title was given and it's NOT a large_header template (where title handling is more complex)
-                // ensure the main 'title' field is set.
-                if (titleText != null && titleText.isNotEmpty && templateName != 'large_header') {
-                    newAppBar['title'] = {'text': titleText};
-                }
-
-                pageToUpdateData['appBar'] = newAppBar;
-                pagesList[pageIndex] = pageToUpdateData;
-                _parsedYamlMap!['pages'] = pagesList;
-                _operationMessage = 'AppBar added to page "$pageName" ${templateName != null ? "using template '$templateName'" : ""}.';
-              } else {
-                _operationMessage = 'Error: Page named "$pageName" not found.';
-              }
-            } else {
-              _operationMessage = 'Error: Unrecognized "ADD" command structure.';
             }
-            break;
-          default:
-            _operationMessage = 'Error: Unrecognized command action.';
+            if (!conversionSuccess) {
+              _operationMessage =
+                  "Error: 'pages' list contains elements that are not valid page objects (maps).";
+            } else {
+              _parsedYamlMap!['pages'] = typedPagesList;
+              bool pageExists = typedPagesList.any((p) =>
+                  p['name']?.toString().toLowerCase() ==
+                  pageName.toLowerCase());
+              if (pageExists) {
+                _operationMessage =
+                    'Error: Page named "$pageName" already exists.';
+              } else {
+                typedPagesList.add({'name': pageName, 'widgets': []});
+                _parsedYamlMap!['pages'] = typedPagesList;
+                _operationMessage = 'Page "$pageName" created successfully.';
+              }
+            }
+          }
         }
+      } else if (isSetBgColor) {
+        String pageName = '';
+        String colorValue = '';
+
+        try {
+          // Extract page name - assuming format "background color of PAGE to COLOR"
+          if (promptTrimmed.contains("background color of ")) {
+            pageName = promptTrimmed
+                .split("background color of ")[1]
+                .split(" to ")[0]
+                .trim();
+            colorValue = promptTrimmed.split(" to ")[1].trim();
+          }
+          // Also handle "bg color of PAGE to COLOR" format
+          else if (promptTrimmed.contains("bg color of ")) {
+            pageName =
+                promptTrimmed.split("bg color of ")[1].split(" to ")[0].trim();
+            colorValue = promptTrimmed.split(" to ")[1].trim();
+          }
+
+          // Remove quotes if present
+          if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
+              (pageName.startsWith('"') && pageName.endsWith('"'))) {
+            pageName = pageName.substring(1, pageName.length - 1);
+          }
+
+          if ((colorValue.startsWith("'") && colorValue.endsWith("'")) ||
+              (colorValue.startsWith('"') && colorValue.endsWith('"'))) {
+            colorValue = colorValue.substring(1, colorValue.length - 1);
+          }
+        } catch (e) {
+          _operationMessage =
+              'Error parsing background color command. Format should be: "set background color of PAGE to COLOR"';
+          return;
+        }
+
+        if (!_parsedYamlMap!.containsKey('pages') ||
+            _parsedYamlMap!['pages'] is! List ||
+            (_parsedYamlMap!['pages'] as List).isEmpty) {
+          _operationMessage =
+              'Error: No pages found or "pages" is not a valid list. Cannot set background color.';
+        } else {
+          var pagesList = _parsedYamlMap!['pages'] as List;
+          int pageIndex = -1;
+          Map<String, dynamic>? pageToUpdate;
+          for (int i = 0; i < pagesList.length; i++) {
+            var page = pagesList[i];
+            if (page is Map &&
+                page.containsKey('name') &&
+                page['name']?.toString().toLowerCase() ==
+                    pageName.toLowerCase()) {
+              pageToUpdate = Map<String, dynamic>.from(page);
+              pageIndex = i;
+              break;
+            }
+          }
+          if (pageToUpdate != null && pageIndex != -1) {
+            pageToUpdate['backgroundColor'] = colorValue;
+            pagesList[pageIndex] = pageToUpdate;
+            _parsedYamlMap!['pages'] = pagesList;
+            _operationMessage =
+                'Background color of page "$pageName" set to "$colorValue".';
+          } else {
+            _operationMessage = 'Error: Page named "$pageName" not found.';
+          }
+        }
+      }
+      // New command handlers
+      else if (isDeletePage) {
+        String pageName = '';
+        if (promptTrimmed.startsWith('delete page')) {
+          pageName = promptTrimmed.substring('delete page'.length).trim();
+        } else {
+          // remove page
+          pageName = promptTrimmed.substring('remove page'.length).trim();
+        }
+
+        // Remove quotes if present
+        if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
+            (pageName.startsWith('"') && pageName.endsWith('"'))) {
+          pageName = pageName.substring(1, pageName.length - 1);
+        }
+
+        if (pageName.isEmpty) {
+          _operationMessage = 'Error: Page name cannot be empty for deletion.';
+        } else if (!_parsedYamlMap!.containsKey('pages') ||
+            _parsedYamlMap!['pages'] is! List ||
+            (_parsedYamlMap!['pages'] as List).isEmpty) {
+          _operationMessage =
+              'Error: No pages found or "pages" is not a valid list. Cannot delete page.';
+        } else {
+          var pagesList = _parsedYamlMap!['pages'] as List;
+          int pageIndexToDelete = -1;
+
+          for (int i = 0; i < pagesList.length; i++) {
+            var page = pagesList[i];
+            if (page is Map &&
+                page.containsKey('name') &&
+                page['name']?.toString().toLowerCase() ==
+                    pageName.toLowerCase()) {
+              pageIndexToDelete = i;
+              break;
+            }
+          }
+
+          if (pageIndexToDelete != -1) {
+            pagesList.removeAt(pageIndexToDelete);
+            _parsedYamlMap!['pages'] = pagesList;
+            _operationMessage = 'Page "$pageName" deleted successfully.';
+          } else {
+            _operationMessage = 'Error: Page named "$pageName" not found.';
+          }
+        }
+      } else if (isAddWidget) {
+        try {
+          // Format: "add widget TYPE with PROPERTIES to page PAGENAME"
+          // Example: "add widget button with text:Click me,color:blue to page homepage"
+
+          // First get the widget part and page name part
+          var parts = promptTrimmed.split(' to page ');
+          if (parts.length != 2) {
+            throw Exception('Invalid format');
+          }
+
+          String pageName = parts[1].trim();
+          // Remove quotes if present
+          if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
+              (pageName.startsWith('"') && pageName.endsWith('"'))) {
+            pageName = pageName.substring(1, pageName.length - 1);
+          }
+
+          // Now parse the widget part
+          var widgetPart = parts[0].substring('add widget '.length);
+          var widgetTypeParts = widgetPart.split(' with ');
+          String widgetType = widgetTypeParts[0].trim();
+          Map<String, String> properties = {};
+
+          // If there are properties, parse them
+          if (widgetTypeParts.length > 1) {
+            var propertiesList = widgetTypeParts[1].split(',');
+            for (var property in propertiesList) {
+              var keyValue = property.split(':');
+              if (keyValue.length == 2) {
+                properties[keyValue[0].trim()] = keyValue[1].trim();
+              }
+            }
+          }
+
+          // Find the page to add the widget to
+          if (!_parsedYamlMap!.containsKey('pages') ||
+              _parsedYamlMap!['pages'] is! List ||
+              (_parsedYamlMap!['pages'] as List).isEmpty) {
+            _operationMessage =
+                'Error: No pages found or "pages" is not a valid list. Cannot add widget.';
+            return;
+          }
+
+          var pagesList = _parsedYamlMap!['pages'] as List;
+          int pageIndex = -1;
+          Map<String, dynamic>? pageToUpdate;
+
+          for (int i = 0; i < pagesList.length; i++) {
+            var page = pagesList[i];
+            if (page is Map &&
+                page.containsKey('name') &&
+                page['name']?.toString().toLowerCase() ==
+                    pageName.toLowerCase()) {
+              pageToUpdate = Map<String, dynamic>.from(page);
+              pageIndex = i;
+              break;
+            }
+          }
+
+          if (pageToUpdate != null && pageIndex != -1) {
+            // Make sure widgets list exists
+            if (!pageToUpdate.containsKey('widgets')) {
+              pageToUpdate['widgets'] = [];
+            }
+
+            // Create the widget object
+            Map<String, dynamic> widgetObject = {
+              'type': widgetType,
+              'properties': properties
+            };
+
+            // Add a unique id for the widget
+            widgetObject['id'] =
+                'widget_${DateTime.now().millisecondsSinceEpoch}';
+
+            // Add the widget to the page
+            List widgetsList = pageToUpdate['widgets'] as List;
+            widgetsList.add(widgetObject);
+            pageToUpdate['widgets'] = widgetsList;
+
+            // Update the page in the pages list
+            pagesList[pageIndex] = pageToUpdate;
+            _parsedYamlMap!['pages'] = pagesList;
+
+            _operationMessage =
+                'Added "$widgetType" widget to page "$pageName" with ${properties.length} properties.';
+          } else {
+            _operationMessage = 'Error: Page named "$pageName" not found.';
+          }
+        } catch (e) {
+          _operationMessage =
+              'Error parsing add widget command. Format should be: "add widget TYPE with PROP1:VALUE1,PROP2:VALUE2 to page PAGENAME"';
+        }
+      } else if (isSetThemeColor) {
+        try {
+          // Format: "set theme color PRIMARY to #FF0000"
+          String colorType = '';
+          String colorValue = '';
+
+          // Extract color type and value
+          var parts = promptTrimmed.split(' to ');
+          if (parts.length != 2) {
+            throw Exception('Invalid format');
+          }
+
+          colorValue = parts[1].trim();
+          // Remove quotes if present
+          if ((colorValue.startsWith("'") && colorValue.endsWith("'")) ||
+              (colorValue.startsWith('"') && colorValue.endsWith('"'))) {
+            colorValue = colorValue.substring(1, colorValue.length - 1);
+          }
+
+          colorType = parts[0].substring('set theme color '.length).trim();
+
+          // Make sure theme object exists
+          if (!_parsedYamlMap!.containsKey('theme')) {
+            _parsedYamlMap!['theme'] = {};
+          }
+
+          var theme = _parsedYamlMap!['theme'];
+          if (theme is! Map) {
+            _parsedYamlMap!['theme'] = {};
+            theme = _parsedYamlMap!['theme'];
+          }
+
+          // Update the appropriate theme color
+          Map<String, dynamic> themeMap = Map<String, dynamic>.from(theme);
+
+          switch (colorType) {
+            case 'primary':
+              themeMap['primaryColor'] = colorValue;
+              break;
+            case 'secondary':
+              themeMap['secondaryColor'] = colorValue;
+              break;
+            case 'background':
+              themeMap['backgroundColor'] = colorValue;
+              break;
+            case 'text':
+              themeMap['textColor'] = colorValue;
+              break;
+            default:
+              themeMap[colorType + 'Color'] = colorValue;
+          }
+
+          _parsedYamlMap!['theme'] = themeMap;
+          _operationMessage = 'Theme $colorType color set to "$colorValue".';
+        } catch (e) {
+          _operationMessage =
+              'Error parsing theme color command. Format should be: "set theme color TYPE to COLOR"';
+        }
+      } else if (isSetAppTitle) {
+        final newTitle =
+            promptTrimmed.substring('set app title to'.length).trim();
+        if (newTitle.isEmpty) {
+          _operationMessage = 'Error: New app title cannot be empty.';
+        } else {
+          // Make sure app metadata exists
+          if (!_parsedYamlMap!.containsKey('appInfo')) {
+            _parsedYamlMap!['appInfo'] = {};
+          }
+
+          var appInfo = _parsedYamlMap!['appInfo'];
+          if (appInfo is! Map) {
+            _parsedYamlMap!['appInfo'] = {};
+            appInfo = _parsedYamlMap!['appInfo'];
+          }
+
+          Map<String, dynamic> appInfoMap = Map<String, dynamic>.from(appInfo);
+          appInfoMap['title'] = newTitle;
+          _parsedYamlMap!['appInfo'] = appInfoMap;
+
+          _operationMessage = 'App title set to "$newTitle".';
+        }
+      } else {
+        _operationMessage = 'Prompt not recognized. Examples:\n'
+            '- Set project name to MyNewApp\n'
+            '- Create page \'UserProfile\'\n'
+            '- Add page "SettingsPage"\n'
+            '- Set background color of page "UserProfile" to "blue"\n'
+            '- Delete page "OldPage"\n'
+            '- Add widget button with text:Click me,color:blue to page homepage\n'
+            '- Set theme color primary to "#FF5722"\n'
+            '- Set app title to "My Awesome App"';
       }
 
       try {
@@ -690,7 +970,28 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _generatedYamlMessage =
               '$_operationMessage\n\nModified YAML:\n\n$yamlString';
+
+          // Also save the current state for potential export
+          _exportedFiles.clear(); // Clear existing files before regenerating
+
+          // Always ensure we preserve the complete raw YAML
+          if (_rawFetchedYaml != null) {
+            _exportedFiles['complete_raw.yaml'] = _rawFetchedYaml!;
+          }
+
+          _exportedFiles['raw_output.yaml'] = yamlString;
         });
+
+        // Prepare files for export after successful processing
+        // Make sure _hasModifications is set to ensure we show changed files
+        setState(() {
+          _hasModifications = true;
+        });
+        _prepareFilesForExport();
+
+        // Debug information
+        print("Changed files count: ${_changedFiles.length}");
+        print("Files detected as changed: ${_changedFiles.keys.join(', ')}");
       } catch (e) {
         setState(() {
           _generatedYamlMessage =
@@ -701,111 +1002,346 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Map<String, dynamic> _parseCommand(String prompt) {
-    final originalPromptTrimmed = prompt.trim(); // Use this for extracting original case values if needed before lowercasing.
-    final promptLower = originalPromptTrimmed.toLowerCase();
+  @override
+  Widget build(BuildContext context) {
+    bool hasCredentials = _projectIdController.text.isNotEmpty &&
+        _apiTokenController.text.isNotEmpty;
+    bool hasYaml = _parsedYamlMap != null;
 
-    // Helper to unquote
-    String unquote(String text) {
-      text = text.trim(); 
-      if ((text.startsWith("'") && text.endsWith("'")) ||
-          (text.startsWith('"') && text.endsWith('"'))) {
-        return text.substring(1, text.length - 1).trim(); 
-      }
-      return text;
+    return Scaffold(
+      appBar: AppBar(title: Text('FlutterFlow YAML Generator')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Authentication Section
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('FlutterFlow Credentials',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 8),
+                    TextField(
+                        controller: _projectIdController,
+                        decoration: InputDecoration(labelText: 'Project ID')),
+                    TextField(
+                        controller: _apiTokenController,
+                        obscureText: true,
+                        decoration: InputDecoration(labelText: 'API Token')),
+                    SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: (!hasYaml && hasCredentials)
+                          ? _fetchProjectYaml
+                          : null,
+                      child: Text('Fetch YAML'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            SizedBox(height: 16),
+
+            // Prompt Section - Only show after YAML is loaded
+            if (hasYaml)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Modify YAML',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
+                      SizedBox(height: 8),
+                      TextField(
+                          controller: _promptController,
+                          decoration: InputDecoration(
+                              labelText:
+                                  'Enter Prompt (e.g., "Set project name to MyApp")')),
+                      SizedBox(height: 12),
+                      ElevatedButton(
+                        onPressed: _promptController.text.isNotEmpty
+                            ? _processPromptAndGenerateYaml
+                            : null,
+                        child: Text('Generate from Prompt'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            if (hasYaml) SizedBox(height: 16),
+
+            // Expandable Raw Output Section - Only show after YAML is loaded AND if there's an error
+            if (hasYaml &&
+                (_generatedYamlMessage.contains('Error:') ||
+                    _generatedYamlMessage.contains('Failed')))
+              Card(
+                child: Column(
+                  children: [
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _isOutputExpanded = !_isOutputExpanded;
+                        });
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Row(
+                          children: [
+                            Icon(
+                                _isOutputExpanded
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                                color: Colors.red),
+                            SizedBox(width: 8),
+                            Text(
+                              'Error Details',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red),
+                            ),
+                            Spacer(),
+                            if (_isOutputExpanded)
+                              ElevatedButton.icon(
+                                icon: Icon(Icons.copy, size: 16),
+                                label: Text('Copy Error'),
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(
+                                      text: _generatedYamlMessage));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Error details copied to clipboard'),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (_isOutputExpanded)
+                      Container(
+                        // Increased height for better visibility
+                        height: 300,
+                        padding: EdgeInsets.all(8.0),
+                        color: Colors.red[50],
+                        child: SingleChildScrollView(
+                          child: SelectableText(
+                            _generatedYamlMessage,
+                            style: TextStyle(fontFamily: 'monospace'),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+            // Files Section - Only show after YAML is loaded
+            if (hasYaml)
+              Expanded(
+                child: _buildExportFilesView(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Build the export files view
+  Widget _buildExportFilesView() {
+    // Use changedFiles if modifications were made, otherwise use exportedFiles
+    Map<String, String> filesToShow =
+        _hasModifications ? _changedFiles : _exportedFiles;
+
+    // Make sure our key files are shown first
+    List<String> orderedKeys = filesToShow.keys.toList();
+    orderedKeys.sort((a, b) {
+      // Show archive files first
+      if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
+      if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
+      // Then show complete raw
+      if (a.contains('complete_raw.yaml')) return -1;
+      if (b.contains('complete_raw.yaml')) return 1;
+      if (a.contains('raw_project.yaml')) return -1;
+      if (b.contains('raw_project.yaml')) return 1;
+      return a.compareTo(b);
+    });
+
+    // Debug all file names and sizes
+    for (var fileName in orderedKeys) {
+      String content = filesToShow[fileName] ?? '';
+      print('DEBUG: Available file: $fileName (${content.length} chars)');
     }
 
-    // Pattern: set project name to <name>
-    RegExp setProjectNameRegExp = RegExp(r'^set project name to\s+(.+)$', caseSensitive: false);
-    Match? match = setProjectNameRegExp.firstMatch(originalPromptTrimmed);
-    if (match != null) {
-      return {
-        'action': 'SET',
-        'targetType': 'PROJECT_PROPERTY',
-        'targetName': 'projectName', // This is fixed
-        'value': unquote(match.group(1)!),
-      };
-    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+            _hasModifications
+                ? 'Changed Files'
+                : 'Export Files - Archive Files in Green',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        SizedBox(height: 4),
+        Text(
+            '💡 Use "Copy ARCHIVE Content" buttons on green files to get complete YAML',
+            style: TextStyle(color: Colors.green[800], fontSize: 12)),
+        Expanded(
+          child: filesToShow.isEmpty
+              ? Center(
+                  child: Text(
+                      'No YAML files available. ${_parsedYamlMap != null ? "Enter a prompt to make changes." : ""}'),
+                )
+              : ListView.builder(
+                  itemCount: orderedKeys.length,
+                  itemBuilder: (context, index) {
+                    String fileName = orderedKeys[index];
+                    String fileContent = filesToShow[fileName] ?? '';
 
-    // Pattern: create page <name> OR add page <name>
-    RegExp createPageRegExp = RegExp(r'^(create|add)\s+page\s+(.+)$', caseSensitive: false);
-    match = createPageRegExp.firstMatch(originalPromptTrimmed);
-    if (match != null) {
-      return {
-        'action': 'CREATE',
-        'targetType': 'PAGE',
-        'targetName': unquote(match.group(2)!),
-      };
-    }
+                    // Debug file sizes
+                    print(
+                        'DEBUG: File "$fileName" size: ${fileContent.length} chars');
 
-    // Pattern: set background color of page <page> to <color>
-    RegExp setPageBgColorRegExp = RegExp(r'^set\s+(?:background|bg)\s+color\s+of\s+page\s+(.+?)\s+to\s+(.+)$', caseSensitive: false);
-    match = setPageBgColorRegExp.firstMatch(originalPromptTrimmed);
-    if (match != null) {
-      return {
-        'action': 'SET',
-        'targetType': 'PAGE_PROPERTY',
-        'targetName': unquote(match.group(1)!), // Page name
-        'options': {
-          'property': 'backgroundColor', 
-          'value': unquote(match.group(2)!), // Color value
-        }
-      };
-    }
+                    // Determine if file was deleted
+                    bool isDeleted = fileContent ==
+                        "# This file was removed in the latest changes";
 
-    // Pattern: SET THEME_COLOR <color_name> TO <hex_value>
-    RegExp setThemeColorRegExp = RegExp(r'^set\s+theme_color\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+to\s+([#a-fA-F0-9]+)$', caseSensitive: false);
-    match = setThemeColorRegExp.firstMatch(originalPromptTrimmed);
-    if (match != null) {
-      return {
-        'action': 'SET',
-        'targetType': 'THEME_COLOR',
-        'targetName': match.group(1)!.toLowerCase(), // color_name (e.g. primary, secondaryText) - normalized to lowercase
-        'value': match.group(2)!, // hex_value (e.g. #FF00FF00 or FF00FF00) - preserve case as entered
-      };
-    }
-    
-    // Pattern: ADD APPBAR TO PAGE <page_name> [USING TEMPLATE <template_name>] [WITH TITLE <title_text>]
-    // Page name can be quoted or unquoted. Template name and title can be quoted or unquoted.
-    RegExp addAppBarRegExp = RegExp(
-      r'^add\s+appbar\s+to\s+page\s+(' + // Start Page Name
-          r'''(?:[^'\s"]+|'[^']*'|"[^"]*")''' + // Page name: unquoted, or single/double quoted
-      r')' + // End Page Name
-      r'(?:\s+using\s+template\s+(' + // Start Optional Template
-          r'''(?:[^'\s"]+|'[^']*'|"[^"]*")''' + // Template name: unquoted, or single/double quoted
-      r'))?' + // End Optional Template
-      r'(?:\s+with\s+title\s+(' + // Start Optional Title
-          r'''(?:[^'\s"]+|'[^']*'|"[^"]*")''' + // Title text: unquoted, or single/double quoted
-      r'))?$', // End Optional Title
-      caseSensitive: false);
+                    // Highlight the complete raw file
+                    bool isCompleteRaw = fileName.contains('complete_raw.yaml');
 
-    match = addAppBarRegExp.firstMatch(originalPromptTrimmed);
-    if (match != null) {
-      Map<String, dynamic> options = {};
-      if (match.group(2) != null) { // template_name
-        options['template_name'] = unquote(match.group(2)!).toLowerCase(); // Normalize template name to lowercase
-      }
-      if (match.group(3) != null) { // title_text
-        options['title_text'] = unquote(match.group(3)!);
-      }
-      return {
-        'action': 'ADD',
-        'targetType': 'APPBAR_TO_PAGE',
-        'targetName': unquote(match.group(1)!), // page_name
-        'options': options,
-      };
-    }
+                    // Highlight archive files
+                    bool isArchiveFile = fileName.startsWith('archive_');
 
-    return {'action': 'ERROR', 'message': 'Error: Unrecognized command structure. Examples:\n'
-            '- Set project name to MyNewApp\n'
-            '- Create page \'UserProfile\'\n'
-            '- Add page "SettingsPage"\n'
-            '- Set background color of page "UserProfile" to "blue"\n'
-            '- Set theme_color primary TO #FF00FF00\n'
-            '- Set theme_color secondary_text TO FFCCCCCC\n'
-            '- Add appbar to page HomePage using template LARGE_HEADER with title "My Home"\n'
-            '- Add appbar to page SettingsPage with title "Settings"\n'
-            '- Add appbar to page DashboardPage'};
+                    return Card(
+                      margin: EdgeInsets.only(bottom: 16),
+                      // Highlight the raw file
+                      color: isArchiveFile
+                          ? Colors.green[50]
+                          : (isCompleteRaw ? Colors.blue[50] : null),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(fileName,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: isDeleted
+                                          ? Colors.red
+                                          : (isArchiveFile
+                                              ? Colors.green[800]
+                                              : (isCompleteRaw
+                                                  ? Colors.blue[800]
+                                                  : null)),
+                                    )),
+                                ElevatedButton.icon(
+                                  icon: Icon(Icons.copy, size: 16),
+                                  label: Text(isArchiveFile
+                                      ? 'Copy ARCHIVE Content'
+                                      : (isCompleteRaw
+                                          ? 'Copy COMPLETE Content'
+                                          : 'Copy Full Content')),
+                                  onPressed: () {
+                                    // Log length for debugging
+                                    print(
+                                        'DEBUG: Copying file "$fileName" with content length: ${fileContent.length}');
+                                    print(
+                                        'DEBUG: First 100 chars of content: ${fileContent.substring(0, fileContent.length > 100 ? 100 : fileContent.length)}');
+                                    print(
+                                        'DEBUG: Last 100 chars of content: ${fileContent.substring(fileContent.length > 100 ? fileContent.length - 100 : 0)}');
+
+                                    // For web, try to use a more direct approach
+                                    if (kIsWeb) {
+                                      try {
+                                        // Directly use web APIs for larger content
+                                        web.window.navigator.clipboard
+                                            ?.writeText(fileContent)
+                                            .then((_) {
+                                          print(
+                                              'DEBUG: Web clipboard API used successfully');
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                  '$fileName copied to clipboard (${fileContent.length} chars)'),
+                                              duration: Duration(seconds: 2),
+                                            ),
+                                          );
+                                        }).catchError((error) {
+                                          print(
+                                              'DEBUG: Web clipboard API error: $error');
+                                          // Fall back to Flutter's method
+                                          _fallbackClipboardCopy(
+                                              context, fileName, fileContent);
+                                        });
+                                      } catch (e) {
+                                        print(
+                                            'DEBUG: Web clipboard API exception: $e');
+                                        // Fall back to Flutter's method
+                                        _fallbackClipboardCopy(
+                                            context, fileName, fileContent);
+                                      }
+                                    } else {
+                                      // Use Flutter's method for non-web
+                                      _fallbackClipboardCopy(
+                                          context, fileName, fileContent);
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    padding: EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    // Use different color for the complete raw file
+                                    backgroundColor: isArchiveFile
+                                        ? Colors.green
+                                        : (isCompleteRaw ? Colors.blue : null),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Divider(height: 1),
+                          Container(
+                            // Increase height for better visibility
+                            height: 300,
+                            padding: EdgeInsets.all(8.0),
+                            color: isDeleted
+                                ? Colors.red[50]
+                                : (isArchiveFile
+                                    ? Colors.green[50]
+                                    : (isCompleteRaw
+                                        ? Colors.blue[50]
+                                        : Colors.grey[200])),
+                            child: SingleChildScrollView(
+                              child: SelectableText(
+                                fileContent,
+                                style: TextStyle(fontFamily: 'monospace'),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
   }
 
   Future<void> _handleFetchOrGenerate() async {
@@ -816,55 +1352,252 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text('FlutterFlow YAML Generator')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-                controller: _projectIdController,
-                decoration: InputDecoration(labelText: 'Project ID')),
-            TextField(
-                controller: _apiTokenController,
-                obscureText: true,
-                decoration: InputDecoration(labelText: 'API Token')),
-            TextField(
-                controller: _promptController,
-                decoration: InputDecoration(
-                    labelText:
-                        'Enter Prompt (e.g., "Set project name to MyApp")')),
-            SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: (_rawFetchedYaml == null ||
-                      _parsedYamlMap == null) // Fetch Mode
-                  ? (_projectIdController.text.isNotEmpty &&
-                          _apiTokenController.text.isNotEmpty
-                      ? _handleFetchOrGenerate
-                      : null) // Enable only if creds are present
-                  : (_promptController.text.isNotEmpty
-                      ? _handleFetchOrGenerate
-                      : null), // Generate Mode: Enable only if prompt is present
-              child: Text(_rawFetchedYaml == null || _parsedYamlMap == null
-                  ? 'Fetch YAML'
-                  : 'Generate from Prompt'),
-            ),
-            SizedBox(height: 16),
-            Expanded(
-              child: SingleChildScrollView(
-                child: Container(
-                  padding: EdgeInsets.all(8.0),
-                  color: Colors.grey[200],
-                  child: Text(_generatedYamlMessage),
-                ),
-              ),
-            ),
-          ],
+  // Helper to export YAML to multiple files
+  void _prepareFilesForExport() {
+    if (_parsedYamlMap == null) return;
+
+    // Store archive files in a temporary map to preserve them
+    Map<String, String> archiveFiles = {};
+    _exportedFiles.forEach((key, value) {
+      if (key.startsWith('archive_')) {
+        archiveFiles[key] = value;
+      }
+    });
+
+    // Now clear the export files
+    _exportedFiles.clear();
+
+    // Restore archive files
+    archiveFiles.forEach((key, value) {
+      _exportedFiles[key] = value;
+    });
+
+    // IMPORTANT: Always include the raw YAML content first
+    if (_rawFetchedYaml != null) {
+      _exportedFiles['raw_project.yaml'] = _rawFetchedYaml!;
+      // Store raw YAML as complete_raw.yaml as well to make it more visible
+      _exportedFiles['complete_raw.yaml'] = _rawFetchedYaml!;
+    }
+
+    // Instead of one large project.yaml file, split into components
+
+    // Project name and metadata
+    Map<String, dynamic> projectMetadata = {};
+    if (_parsedYamlMap!.containsKey('projectName')) {
+      projectMetadata['projectName'] = _parsedYamlMap!['projectName'];
+    }
+    if (_parsedYamlMap!.containsKey('projectType')) {
+      projectMetadata['projectType'] = _parsedYamlMap!['projectType'];
+    }
+    if (!projectMetadata.isEmpty) {
+      _exportedFiles['project_metadata.yaml'] =
+          _mapToYamlString(projectMetadata);
+    }
+
+    // Extract pages into separate files if they exist
+    if (_parsedYamlMap!.containsKey('pages') &&
+        _parsedYamlMap!['pages'] is List) {
+      List pagesList = _parsedYamlMap!['pages'] as List;
+
+      for (var i = 0; i < pagesList.length; i++) {
+        var page = pagesList[i];
+        if (page is Map && page.containsKey('name')) {
+          String pageName = page['name'].toString();
+          String safeFileName =
+              pageName.replaceAll(RegExp(r'[^\w]'), '_').toLowerCase();
+          _exportedFiles['page_${safeFileName}.yaml'] =
+              _mapToYamlString(Map<String, dynamic>.from(page));
+        }
+      }
+    }
+
+    // Extract theme if it exists
+    if (_parsedYamlMap!.containsKey('theme') &&
+        _parsedYamlMap!['theme'] is Map) {
+      _exportedFiles['theme.yaml'] = _mapToYamlString(
+          Map<String, dynamic>.from(_parsedYamlMap!['theme'] as Map));
+    }
+
+    // Extract app info if it exists
+    if (_parsedYamlMap!.containsKey('appInfo') &&
+        _parsedYamlMap!['appInfo'] is Map) {
+      _exportedFiles['app_info.yaml'] = _mapToYamlString(
+          Map<String, dynamic>.from(_parsedYamlMap!['appInfo'] as Map));
+    }
+
+    // Extract widgets if they exist
+    if (_parsedYamlMap!.containsKey('widgets') &&
+        _parsedYamlMap!['widgets'] is List) {
+      _exportedFiles['widgets.yaml'] =
+          _mapToYamlString({'widgets': _parsedYamlMap!['widgets']});
+    }
+
+    // Extract assets if they exist
+    if (_parsedYamlMap!.containsKey('assets') &&
+        _parsedYamlMap!['assets'] is Map) {
+      _exportedFiles['assets.yaml'] = _mapToYamlString(
+          Map<String, dynamic>.from(_parsedYamlMap!['assets'] as Map));
+    }
+
+    // Extract styles if they exist
+    if (_parsedYamlMap!.containsKey('styles') &&
+        _parsedYamlMap!['styles'] is Map) {
+      _exportedFiles['styles.yaml'] = _mapToYamlString(
+          Map<String, dynamic>.from(_parsedYamlMap!['styles'] as Map));
+    }
+
+    // Extract any other major top-level components
+    _parsedYamlMap!.forEach((key, value) {
+      if (![
+        'projectName',
+        'projectType',
+        'pages',
+        'theme',
+        'appInfo',
+        'widgets',
+        'assets',
+        'styles'
+      ].contains(key)) {
+        if (value is Map || value is List) {
+          String safeFileName =
+              key.replaceAll(RegExp(r'[^\w]'), '_').toLowerCase();
+          _exportedFiles['${safeFileName}.yaml'] =
+              _mapToYamlString({key: value});
+        }
+      }
+    });
+
+    // Full dump for troubleshooting - always include to ensure all content is available
+    _exportedFiles['full_project.yaml'] = _mapToYamlString(_parsedYamlMap!);
+
+    // Debug the full project file size
+    print(
+        'DEBUG: full_project.yaml content length: ${_exportedFiles['full_project.yaml']?.length}');
+    print(
+        'DEBUG: raw_project.yaml content length: ${_exportedFiles['raw_project.yaml']?.length}');
+
+    // If this is the first load, save as original files
+    if (_originalFiles.isEmpty && !_hasModifications) {
+      _originalFiles = Map<String, String>.from(_exportedFiles);
+      _changedFiles = Map<String, String>.from(_exportedFiles);
+    } else if (_hasModifications) {
+      // Compare with original files to determine which have changed
+      _changedFiles.clear();
+
+      // First add all archive files to changedFiles
+      _exportedFiles.forEach((fileName, content) {
+        if (fileName.startsWith('archive_')) {
+          _changedFiles[fileName] = content;
+        }
+      });
+
+      // Make sure raw files are always included
+      if (_exportedFiles.containsKey('complete_raw.yaml')) {
+        _changedFiles['complete_raw.yaml'] =
+            _exportedFiles['complete_raw.yaml']!;
+      }
+      if (_exportedFiles.containsKey('raw_project.yaml')) {
+        _changedFiles['raw_project.yaml'] = _exportedFiles['raw_project.yaml']!;
+      }
+
+      // First check if we have originalFiles to compare against
+      if (_originalFiles.isEmpty) {
+        // If no original files are stored (shouldn't happen), treat all as changed
+        _exportedFiles.forEach((fileName, content) {
+          if (!fileName.startsWith('archive_') &&
+              !fileName.contains('raw_project.yaml') &&
+              !fileName.contains('complete_raw.yaml')) {
+            _changedFiles[fileName] = content;
+          }
+        });
+        print("No original files to compare against. Treating all as changed.");
+      } else {
+        // Compare each file with its original version
+        _exportedFiles.forEach((fileName, content) {
+          // Skip archive and raw files as they've already been added
+          if (fileName.startsWith('archive_') ||
+              fileName.contains('raw_project.yaml') ||
+              fileName.contains('complete_raw.yaml')) {
+            return;
+          }
+
+          if (!_originalFiles.containsKey(fileName)) {
+            // New file
+            _changedFiles[fileName] = content;
+            print("New file detected: $fileName");
+          } else if (_originalFiles[fileName] != content) {
+            // Changed file
+            _changedFiles[fileName] = content;
+            print("Modified file detected: $fileName");
+          }
+        });
+
+        // Check for deleted files
+        _originalFiles.forEach((fileName, content) {
+          if (!_exportedFiles.containsKey(fileName) &&
+              !fileName.startsWith('archive_') &&
+              !fileName.contains('raw_project.yaml') &&
+              !fileName.contains('complete_raw.yaml')) {
+            _changedFiles[fileName] =
+                "# This file was removed in the latest changes";
+            print("Deleted file detected: $fileName");
+          }
+        });
+
+        // If no changes were detected but _hasModifications is true,
+        // something might be wrong with our comparison logic
+        if (_changedFiles.isEmpty && _hasModifications) {
+          print(
+              "Warning: _hasModifications is true but no changes detected in files!");
+          // Force at least the raw project file to show as changed
+          if (_exportedFiles.containsKey('raw_project.yaml')) {
+            _changedFiles['raw_project.yaml'] =
+                _exportedFiles['raw_project.yaml']!;
+          } else {
+            // Fall back to the full project file
+            _changedFiles['full_project.yaml'] =
+                _exportedFiles['full_project.yaml']!;
+          }
+        }
+      }
+    }
+
+    print(
+        "Original files: ${_originalFiles.length}, Export files: ${_exportedFiles.length}, Changed files: ${_changedFiles.length}");
+
+    setState(() {
+      _showExportView = true;
+    });
+  }
+
+  // Toggle between export view and normal view
+  void _toggleExportView() {
+    setState(() {
+      _showExportView = !_showExportView;
+    });
+  }
+
+  // Helper method to use Flutter's clipboard
+  void _fallbackClipboardCopy(
+      BuildContext context, String fileName, String fileContent) {
+    Clipboard.setData(ClipboardData(text: fileContent)).then((_) {
+      print('DEBUG: Flutter clipboard data set successfully');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              '$fileName copied to clipboard (${fileContent.length} chars)'),
+          duration: Duration(seconds: 2),
         ),
-      ),
-    );
+      );
+    }).catchError((error) {
+      print('DEBUG: Error setting clipboard data: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error copying to clipboard: $error'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    });
   }
 }
