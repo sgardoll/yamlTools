@@ -1,6 +1,84 @@
-# YAML Tools
+# FlutterFlow YAML Tools
 
-A Flutter web application for working with YAML files from FlutterFlow projects.
+A Flutter application that helps you visualize, explore, and edit YAML files from FlutterFlow projects. It provides multiple ways to view and interact with FlutterFlow YAML structure.
+
+## Key Features
+
+### 1. Tree View Visualization
+
+The application now provides a hierarchical tree view for your FlutterFlow YAML structure! This intuitive visualization makes it easy to understand the relationship between pages, components, and widget trees.
+
+- **Color-coded nodes**: Different types of components are color-coded for easy identification:
+  - Components (purple)
+  - Containers (teal)
+  - Layout widgets like Columns (indigo)
+  - Standard widgets (green)
+  - Collections/data nodes (orange)
+
+- **Expandable/collapsible nodes**: Click on a node to expand or collapse its children, allowing you to focus on specific parts of the widget tree.
+
+- **Interactive navigation**: Click on leaf nodes to view their content in the editor.
+
+### 2. Multiple View Options
+
+Choose the view that best suits your needs:
+
+1. **Edited Files**: View only files you've modified during your session
+2. **Flat List**: View all YAML files in a simple list format (traditional view)
+3. **Tree View**: Visualize the hierarchical structure of your FlutterFlow project
+
+### 3. Authentication & Project Management
+
+- Save and reuse API tokens
+- View recent projects
+- Fetch YAML from FlutterFlow projects
+
+## Getting Started
+
+1. Enter your FlutterFlow Project ID and API Token
+2. Click "Fetch YAML" to download your project YAML files
+3. Explore your project using the different view options:
+   - Switch to "Tree View" to see the hierarchical structure
+   - Use "Flat List" to see all files
+   - Use "Edited Files" to focus on modifications
+
+## How to Get Your FlutterFlow API Token
+
+1. Log in to FlutterFlow
+2. Go to Account Settings
+3. Generate a new API token
+
+## How the Tree View Works
+
+The tree view parses the file paths of your YAML files to reconstruct the widget tree structure. It intelligently identifies different types of nodes based on naming patterns:
+
+- Files in `collections/` are shown as collection nodes
+- Files in `component/` are shown as component nodes
+- Files containing `Container` in their ID are shown as container widgets
+- Files containing `Column` in their ID are shown as layout widgets
+- Other widget files are shown as standard widgets
+
+This provides a much more intuitive visualization than a flat list of files.
+
+## Development
+
+This project is built with Flutter and can be run on web or desktop platforms.
+
+### Running the Project
+
+```bash
+flutter pub get
+flutter run -d chrome
+```
+
+## Dependencies
+
+- flutter
+- http
+- yaml
+- archive
+- shared_preferences
+- path
 
 ## Features
 
@@ -12,33 +90,6 @@ A Flutter web application for working with YAML files from FlutterFlow projects.
 ## Live Demo
 
 The application is deployed at: https://YOUR-USERNAME.github.io/yamlTools/
-
-## Development
-
-### Prerequisites
-
-- Flutter SDK (3.13.0 or higher)
-- Dart SDK
-
-### Setup
-
-1. Clone the repository:
-
-   ```
-   git clone https://github.com/YOUR-USERNAME/yamlTools.git
-   cd yamlTools
-   ```
-
-2. Install dependencies:
-
-   ```
-   flutter pub get
-   ```
-
-3. Run the application:
-   ```
-   flutter run -d chrome
-   ```
 
 ## Deployment
 

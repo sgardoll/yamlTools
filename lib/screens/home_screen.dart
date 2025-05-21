@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../storage/preferences_manager.dart';
 import '../widgets/recent_projects_widget.dart';
+import '../widgets/yaml_tree_view.dart'; // Import our new tree view widget
 
 // Import web-specific functionality with fallback
 // ignore: avoid_web_libraries_in_flutter
@@ -46,15 +47,14 @@ class _HomeScreenState extends State<HomeScreen> {
   // Track which files are expanded
   Set<String> _expandedFiles = {};
 
-  // Add filter option to hide detailed files
-  bool _showDetailedFiles = false;
-
   final _projectIdController = TextEditingController();
   final _apiTokenController = TextEditingController();
-  final _promptController = TextEditingController();
 
   // Project name for display in recent projects list
   String _projectName = "";
+
+  // Add a new state field to track which view is active
+  int _selectedViewIndex = 0; // 0: export view, 1: tree view
 
   // Helper to convert bytes to hex
   String _bytesToHexString(List<int> bytes) {
@@ -179,7 +179,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _projectIdController.addListener(() => setState(() {}));
     _apiTokenController.addListener(() => setState(() {}));
-    _promptController.addListener(() => setState(() {}));
 
     // Load saved API token
     _loadSavedApiToken();
@@ -199,7 +198,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _projectIdController.dispose();
     _apiTokenController.dispose();
-    _promptController.dispose();
 
     // Dispose of all file content controllers
     _fileControllers.forEach((fileName, controller) {
@@ -694,543 +692,25 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _processPromptAndGenerateYaml() {
-    if (_parsedYamlMap == null) {
-      setState(() {
-        _generatedYamlMessage =
-            'Cannot process prompt: YAML data is not available or not correctly formatted. Please fetch valid YAML first.';
-      });
-      return;
-    }
-    final currentPrompt = _promptController.text;
-    if (currentPrompt.isEmpty) {
-      setState(() {
-        _generatedYamlMessage =
-            'Error: Prompt is empty. Please enter a modification instruction.';
-      });
-      return;
-    }
-
-    // Backup all archive files before modifications
-    Map<String, String> archiveBackup = {};
-    _exportedFiles.forEach((key, value) {
-      if (key.startsWith('archive_')) {
-        archiveBackup[key] = value;
-      }
-    });
-
-    // Also backup the combined content
-    String? combinedContentBackup = _exportedFiles['ALL_CONTENT_COMBINED.yaml'];
-
-    // Find and backup the largest file for later restoration
-    String largestContent = "";
-    String largestFileName = "";
-    archiveBackup.forEach((key, value) {
-      if (value.length > largestContent.length) {
-        largestContent = value;
-        largestFileName = key;
-      }
-    });
-
-    if (largestContent.isNotEmpty) {
-      print(
-          'DEBUG: Backed up largest file ($largestFileName) with ${largestContent.length} chars');
-    }
-
-    // Store a copy of the existing files before modification
-    Map<String, String> preModificationFiles =
-        Map<String, String>.from(_exportedFiles);
-
-    setState(() {
-      _generatedYamlMessage = 'Processing prompt...';
-      _operationMessage = ''; // Reset operation message
-      _hasModifications =
-          true; // Set flag to indicate modifications are being made
-
-      // Clear changed files to start fresh
-      _changedFiles.clear();
-    });
-
-    Future.delayed(Duration(milliseconds: 50), () {
-      final promptTrimmed = currentPrompt.trim().toLowerCase();
-
-      // Use string manipulation instead of RegExp for better reliability
-      bool isSetProjectName = promptTrimmed.startsWith('set project name to');
-      bool isCreatePage = promptTrimmed.startsWith('create page') ||
-          promptTrimmed.startsWith('add page');
-      bool isSetBgColor = promptTrimmed.contains('background color') &&
-          promptTrimmed.contains(' to ');
-
-      // New command types
-      bool isDeletePage = promptTrimmed.startsWith('delete page') ||
-          promptTrimmed.startsWith('remove page');
-      bool isAddWidget = promptTrimmed.startsWith('add widget') &&
-          promptTrimmed.contains(' to page ');
-      bool isSetThemeColor = promptTrimmed.startsWith('set theme color') &&
-          promptTrimmed.contains(' to ');
-      bool isSetAppTitle = promptTrimmed.startsWith('set app title to');
-
-      _parsedYamlMap =
-          Map<String, dynamic>.from(_parsedYamlMap!); // Ensure mutable
-
-      if (isSetProjectName) {
-        final newName =
-            promptTrimmed.substring('set project name to'.length).trim();
-        if (newName.isEmpty) {
-          _operationMessage = 'Error: New project name cannot be empty.';
-        } else {
-          _parsedYamlMap!['projectName'] = newName;
-          _operationMessage = 'Project name set to "$newName".';
-        }
-      } else if (isCreatePage) {
-        String pageName = '';
-        if (promptTrimmed.startsWith('create page')) {
-          pageName = promptTrimmed.substring('create page'.length).trim();
-        } else {
-          // add page
-          pageName = promptTrimmed.substring('add page'.length).trim();
-        }
-
-        // Remove quotes if present
-        if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
-            (pageName.startsWith('"') && pageName.endsWith('"'))) {
-          pageName = pageName.substring(1, pageName.length - 1);
-        }
-
-        if (pageName.isEmpty) {
-          _operationMessage = 'Error: Page name cannot be empty for creation.';
-        } else {
-          if (!_parsedYamlMap!.containsKey('pages')) {
-            _parsedYamlMap!['pages'] = [];
-          }
-          var pagesEntry = _parsedYamlMap!['pages'];
-          if (pagesEntry is! List) {
-            _operationMessage =
-                "Error: 'pages' entry exists but is not a list. Cannot add page.";
-          } else {
-            List<Map<String, dynamic>> typedPagesList = [];
-            bool conversionSuccess = true;
-            for (var item in pagesEntry) {
-              if (item is Map) {
-                typedPagesList.add(Map<String, dynamic>.from(item));
-              } else {
-                conversionSuccess = false;
-                break;
-              }
-            }
-            if (!conversionSuccess) {
-              _operationMessage =
-                  "Error: 'pages' list contains elements that are not valid page objects (maps).";
-            } else {
-              _parsedYamlMap!['pages'] = typedPagesList;
-              bool pageExists = typedPagesList.any((p) =>
-                  p['name']?.toString().toLowerCase() ==
-                  pageName.toLowerCase());
-              if (pageExists) {
-                _operationMessage =
-                    'Error: Page named "$pageName" already exists.';
-              } else {
-                typedPagesList.add({'name': pageName, 'widgets': []});
-                _parsedYamlMap!['pages'] = typedPagesList;
-                _operationMessage = 'Page "$pageName" created successfully.';
-              }
-            }
-          }
-        }
-      } else if (isSetBgColor) {
-        String pageName = '';
-        String colorValue = '';
-
-        try {
-          // Extract page name - assuming format "background color of PAGE to COLOR"
-          if (promptTrimmed.contains("background color of ")) {
-            pageName = promptTrimmed
-                .split("background color of ")[1]
-                .split(" to ")[0]
-                .trim();
-            colorValue = promptTrimmed.split(" to ")[1].trim();
-          }
-          // Also handle "bg color of PAGE to COLOR" format
-          else if (promptTrimmed.contains("bg color of ")) {
-            pageName =
-                promptTrimmed.split("bg color of ")[1].split(" to ")[0].trim();
-            colorValue = promptTrimmed.split(" to ")[1].trim();
-          }
-
-          // Remove quotes if present
-          if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
-              (pageName.startsWith('"') && pageName.endsWith('"'))) {
-            pageName = pageName.substring(1, pageName.length - 1);
-          }
-
-          if ((colorValue.startsWith("'") && colorValue.endsWith("'")) ||
-              (colorValue.startsWith('"') && colorValue.endsWith('"'))) {
-            colorValue = colorValue.substring(1, colorValue.length - 1);
-          }
-        } catch (e) {
-          _operationMessage =
-              'Error parsing background color command. Format should be: "set background color of PAGE to COLOR"';
-          return;
-        }
-
-        if (!_parsedYamlMap!.containsKey('pages') ||
-            _parsedYamlMap!['pages'] is! List ||
-            (_parsedYamlMap!['pages'] as List).isEmpty) {
-          _operationMessage =
-              'Error: No pages found or "pages" is not a valid list. Cannot set background color.';
-        } else {
-          var pagesList = _parsedYamlMap!['pages'] as List;
-          int pageIndex = -1;
-          Map<String, dynamic>? pageToUpdate;
-          for (int i = 0; i < pagesList.length; i++) {
-            var page = pagesList[i];
-            if (page is Map &&
-                page.containsKey('name') &&
-                page['name']?.toString().toLowerCase() ==
-                    pageName.toLowerCase()) {
-              pageToUpdate = Map<String, dynamic>.from(page);
-              pageIndex = i;
-              break;
-            }
-          }
-          if (pageToUpdate != null && pageIndex != -1) {
-            pageToUpdate['backgroundColor'] = colorValue;
-            pagesList[pageIndex] = pageToUpdate;
-            _parsedYamlMap!['pages'] = pagesList;
-            _operationMessage =
-                'Background color of page "$pageName" set to "$colorValue".';
-          } else {
-            _operationMessage = 'Error: Page named "$pageName" not found.';
-          }
-        }
-      }
-      // New command handlers
-      else if (isDeletePage) {
-        String pageName = '';
-        if (promptTrimmed.startsWith('delete page')) {
-          pageName = promptTrimmed.substring('delete page'.length).trim();
-        } else {
-          // remove page
-          pageName = promptTrimmed.substring('remove page'.length).trim();
-        }
-
-        // Remove quotes if present
-        if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
-            (pageName.startsWith('"') && pageName.endsWith('"'))) {
-          pageName = pageName.substring(1, pageName.length - 1);
-        }
-
-        if (pageName.isEmpty) {
-          _operationMessage = 'Error: Page name cannot be empty for deletion.';
-        } else if (!_parsedYamlMap!.containsKey('pages') ||
-            _parsedYamlMap!['pages'] is! List ||
-            (_parsedYamlMap!['pages'] as List).isEmpty) {
-          _operationMessage =
-              'Error: No pages found or "pages" is not a valid list. Cannot delete page.';
-        } else {
-          var pagesList = _parsedYamlMap!['pages'] as List;
-          int pageIndexToDelete = -1;
-
-          for (int i = 0; i < pagesList.length; i++) {
-            var page = pagesList[i];
-            if (page is Map &&
-                page.containsKey('name') &&
-                page['name']?.toString().toLowerCase() ==
-                    pageName.toLowerCase()) {
-              pageIndexToDelete = i;
-              break;
-            }
-          }
-
-          if (pageIndexToDelete != -1) {
-            pagesList.removeAt(pageIndexToDelete);
-            _parsedYamlMap!['pages'] = pagesList;
-            _operationMessage = 'Page "$pageName" deleted successfully.';
-          } else {
-            _operationMessage = 'Error: Page named "$pageName" not found.';
-          }
-        }
-      } else if (isAddWidget) {
-        try {
-          // Format: "add widget TYPE with PROPERTIES to page PAGENAME"
-          // Example: "add widget button with text:Click me,color:blue to page homepage"
-
-          // First get the widget part and page name part
-          var parts = promptTrimmed.split(' to page ');
-          if (parts.length != 2) {
-            throw Exception('Invalid format');
-          }
-
-          String pageName = parts[1].trim();
-          // Remove quotes if present
-          if ((pageName.startsWith("'") && pageName.endsWith("'")) ||
-              (pageName.startsWith('"') && pageName.endsWith('"'))) {
-            pageName = pageName.substring(1, pageName.length - 1);
-          }
-
-          // Now parse the widget part
-          var widgetPart = parts[0].substring('add widget '.length);
-          var widgetTypeParts = widgetPart.split(' with ');
-          String widgetType = widgetTypeParts[0].trim();
-          Map<String, String> properties = {};
-
-          // If there are properties, parse them
-          if (widgetTypeParts.length > 1) {
-            var propertiesList = widgetTypeParts[1].split(',');
-            for (var property in propertiesList) {
-              var keyValue = property.split(':');
-              if (keyValue.length == 2) {
-                properties[keyValue[0].trim()] = keyValue[1].trim();
-              }
-            }
-          }
-
-          // Find the page to add the widget to
-          if (!_parsedYamlMap!.containsKey('pages') ||
-              _parsedYamlMap!['pages'] is! List ||
-              (_parsedYamlMap!['pages'] as List).isEmpty) {
-            _operationMessage =
-                'Error: No pages found or "pages" is not a valid list. Cannot add widget.';
-            return;
-          }
-
-          var pagesList = _parsedYamlMap!['pages'] as List;
-          int pageIndex = -1;
-          Map<String, dynamic>? pageToUpdate;
-
-          for (int i = 0; i < pagesList.length; i++) {
-            var page = pagesList[i];
-            if (page is Map &&
-                page.containsKey('name') &&
-                page['name']?.toString().toLowerCase() ==
-                    pageName.toLowerCase()) {
-              pageToUpdate = Map<String, dynamic>.from(page);
-              pageIndex = i;
-              break;
-            }
-          }
-
-          if (pageToUpdate != null && pageIndex != -1) {
-            // Make sure widgets list exists
-            if (!pageToUpdate.containsKey('widgets')) {
-              pageToUpdate['widgets'] = [];
-            }
-
-            // Create the widget object
-            Map<String, dynamic> widgetObject = {
-              'type': widgetType,
-              'properties': properties
-            };
-
-            // Add a unique id for the widget
-            widgetObject['id'] =
-                'widget_${DateTime.now().millisecondsSinceEpoch}';
-
-            // Add the widget to the page
-            List widgetsList = pageToUpdate['widgets'] as List;
-            widgetsList.add(widgetObject);
-            pageToUpdate['widgets'] = widgetsList;
-
-            // Update the page in the pages list
-            pagesList[pageIndex] = pageToUpdate;
-            _parsedYamlMap!['pages'] = pagesList;
-
-            _operationMessage =
-                'Added "$widgetType" widget to page "$pageName" with ${properties.length} properties.';
-          } else {
-            _operationMessage = 'Error: Page named "$pageName" not found.';
-          }
-        } catch (e) {
-          _operationMessage =
-              'Error parsing add widget command. Format should be: "add widget TYPE with PROP1:VALUE1,PROP2:VALUE2 to page PAGENAME"';
-        }
-      } else if (isSetThemeColor) {
-        try {
-          // Format: "set theme color PRIMARY to #FF0000"
-          String colorType = '';
-          String colorValue = '';
-
-          // Extract color type and value
-          var parts = promptTrimmed.split(' to ');
-          if (parts.length != 2) {
-            throw Exception('Invalid format');
-          }
-
-          colorValue = parts[1].trim();
-          // Remove quotes if present
-          if ((colorValue.startsWith("'") && colorValue.endsWith("'")) ||
-              (colorValue.startsWith('"') && colorValue.endsWith('"'))) {
-            colorValue = colorValue.substring(1, colorValue.length - 1);
-          }
-
-          colorType = parts[0].substring('set theme color '.length).trim();
-
-          // Make sure theme object exists
-          if (!_parsedYamlMap!.containsKey('theme')) {
-            _parsedYamlMap!['theme'] = {};
-          }
-
-          var theme = _parsedYamlMap!['theme'];
-          if (theme is! Map) {
-            _parsedYamlMap!['theme'] = {};
-            theme = _parsedYamlMap!['theme'];
-          }
-
-          // Update the appropriate theme color
-          Map<String, dynamic> themeMap = Map<String, dynamic>.from(theme);
-
-          switch (colorType) {
-            case 'primary':
-              themeMap['primaryColor'] = colorValue;
-              break;
-            case 'secondary':
-              themeMap['secondaryColor'] = colorValue;
-              break;
-            case 'background':
-              themeMap['backgroundColor'] = colorValue;
-              break;
-            case 'text':
-              themeMap['textColor'] = colorValue;
-              break;
-            default:
-              themeMap[colorType + 'Color'] = colorValue;
-          }
-
-          _parsedYamlMap!['theme'] = themeMap;
-          _operationMessage = 'Theme $colorType color set to "$colorValue".';
-        } catch (e) {
-          _operationMessage =
-              'Error parsing theme color command. Format should be: "set theme color TYPE to COLOR"';
-        }
-      } else if (isSetAppTitle) {
-        final newTitle =
-            promptTrimmed.substring('set app title to'.length).trim();
-        if (newTitle.isEmpty) {
-          _operationMessage = 'Error: New app title cannot be empty.';
-        } else {
-          // Make sure app metadata exists
-          if (!_parsedYamlMap!.containsKey('appInfo')) {
-            _parsedYamlMap!['appInfo'] = {};
-          }
-
-          var appInfo = _parsedYamlMap!['appInfo'];
-          if (appInfo is! Map) {
-            _parsedYamlMap!['appInfo'] = {};
-            appInfo = _parsedYamlMap!['appInfo'];
-          }
-
-          Map<String, dynamic> appInfoMap = Map<String, dynamic>.from(appInfo);
-          appInfoMap['title'] = newTitle;
-          _parsedYamlMap!['appInfo'] = appInfoMap;
-
-          _operationMessage = 'App title set to "$newTitle".';
-        }
-      } else {
-        _operationMessage = 'Prompt not recognized. Examples:\n'
-            '- Set project name to MyNewApp\n'
-            '- Create page \'UserProfile\'\n'
-            '- Add page "SettingsPage"\n'
-            '- Set background color of page "UserProfile" to "blue"\n'
-            '- Delete page "OldPage"\n'
-            '- Add widget button with text:Click me,color:blue to page homepage\n'
-            '- Set theme color primary to "#FF5722"\n'
-            '- Set app title to "My Awesome App"';
-      }
-
-      try {
-        final yamlString = _mapToYamlString(_parsedYamlMap!);
-
-        // Clear the changed files before adding new ones
-        _changedFiles.clear();
-
-        setState(() {
-          _generatedYamlMessage =
-              '$_operationMessage\n\nModified YAML:\n\n$yamlString';
-
-          // Also save the current state for potential export
-          Map<String, String> currentFiles =
-              Map<String, String>.from(_exportedFiles);
-          _exportedFiles.clear(); // Clear existing files before regenerating
-
-          // Restore archive files from backup (but don't show them in changed files)
-          archiveBackup.forEach((key, value) {
-            _exportedFiles[key] = value;
-          });
-
-          // Restore combined content
-          if (combinedContentBackup != null &&
-              combinedContentBackup.isNotEmpty) {
-            _exportedFiles['ALL_CONTENT_COMBINED.yaml'] = combinedContentBackup;
-            print(
-                'DEBUG: Restored combined file with ${combinedContentBackup.length} chars');
-          }
-
-          // Store the largest content in raw_project.yaml and complete_raw.yaml
-          if (largestContent.isNotEmpty) {
-            _exportedFiles['complete_raw.yaml'] = largestContent;
-            _exportedFiles['raw_project.yaml'] = largestContent;
-            print(
-                'DEBUG: Restored largest content to raw files (${largestContent.length} chars)');
-          }
-
-          // Add the modified content as separate files and mark them as changed ONLY
-          _exportedFiles['modified_yaml.yaml'] = yamlString;
-          _changedFiles['modified_yaml.yaml'] = yamlString;
-
-          _exportedFiles['raw_output.yaml'] = yamlString;
-          _changedFiles['raw_output.yaml'] = yamlString;
-
-          // Show header file with modification information
-          String headerContent = 'YAML MODIFICATION: $currentPrompt\n\n';
-          headerContent += 'Applied on ${DateTime.now()}\n';
-          headerContent += '-----------------------------------\n\n';
-          headerContent += yamlString;
-
-          _exportedFiles['modification_details.yaml'] = headerContent;
-          _changedFiles['modification_details.yaml'] = headerContent;
-
-          print(
-              'DEBUG: Added modified YAML files with ${yamlString.length} chars each');
-
-          // Log the file sizes after restoration
-          print('DEBUG: Files shown after modification:');
-          _changedFiles.forEach((key, value) {
-            print('DEBUG: - $key: ${value.length} chars');
-          });
-        });
-
-        // Make sure _hasModifications is set to ensure we show changed files
-        setState(() {
-          _hasModifications = true;
-        });
-
-        // Auto-expand modified files
-        _expandedFiles.clear();
-        _expandedFiles.add('modification_details.yaml');
-        _expandedFiles.add('modified_yaml.yaml');
-
-        // Debug information
-        print("Changed files count: ${_changedFiles.length}");
-        print(
-            "Files shown after modification: ${_changedFiles.keys.join(', ')}");
-      } catch (e) {
-        setState(() {
-          _generatedYamlMessage =
-              '$_operationMessage\n\nCould not display full structure as YAML.\nError details: $e';
-        });
-        print('Error converting map to YAML for display: $e');
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
+    // Determine if we have credentials filled in
     bool hasCredentials = _projectIdController.text.isNotEmpty &&
         _apiTokenController.text.isNotEmpty;
-    bool hasYaml = _parsedYamlMap != null;
+    bool hasYaml = _exportedFiles.isNotEmpty || _parsedYamlMap != null;
 
     return Scaffold(
-      appBar: AppBar(title: Text('FlutterFlow YAML Generator')),
+      appBar: AppBar(
+        title: Text('FlutterFlow YAML Tools'),
+        actions: [
+          if (hasYaml)
+            IconButton(
+              icon: Icon(Icons.refresh),
+              tooltip: 'Reload YAML',
+              onPressed: hasCredentials ? _fetchProjectYaml : null,
+            ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -1395,115 +875,40 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            SizedBox(height: 16),
-
-            // Prompt Section - Only show after YAML is loaded
-            if (hasYaml)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Modify YAML',
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold)),
-                      SizedBox(height: 8),
-                      TextField(
-                          controller: _promptController,
-                          decoration: InputDecoration(
-                              labelText:
-                                  'Enter Prompt (e.g., "Set project name to MyApp")')),
-                      SizedBox(height: 12),
-                      ElevatedButton(
-                        onPressed: _promptController.text.isNotEmpty
-                            ? _processPromptAndGenerateYaml
-                            : null,
-                        child: Text('Generate from Prompt'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            if (hasYaml) SizedBox(height: 16),
-
-            // Expandable Raw Output Section - Only show after YAML is loaded AND if there's an error
-            if (hasYaml &&
-                (_generatedYamlMessage.contains('Error:') ||
-                    _generatedYamlMessage.contains('Failed')))
-              Card(
-                child: Column(
+            // Add view selection UI when files are available
+            if (_exportedFiles.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16.0),
+                child: Row(
                   children: [
-                    InkWell(
-                      onTap: () {
-                        setState(() {
-                          _isOutputExpanded = !_isOutputExpanded;
-                        });
+                    Text('View Mode: ',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    SizedBox(width: 8),
+                    ChoiceChip(
+                      label: Text('Edited Files'),
+                      selected: _selectedViewIndex == 0,
+                      onSelected: (selected) {
+                        if (selected) setState(() => _selectedViewIndex = 0);
                       },
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Row(
-                          children: [
-                            Icon(
-                                _isOutputExpanded
-                                    ? Icons.expand_less
-                                    : Icons.expand_more,
-                                color: Colors.red),
-                            SizedBox(width: 8),
-                            Text(
-                              'Error Details',
-                              style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red),
-                            ),
-                            Spacer(),
-                            if (_isOutputExpanded)
-                              ElevatedButton.icon(
-                                icon: Icon(Icons.copy, size: 16),
-                                label: Text('Copy Error'),
-                                onPressed: () {
-                                  Clipboard.setData(ClipboardData(
-                                      text: _generatedYamlMessage));
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                          'Error details copied to clipboard'),
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  padding: EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 4),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
                     ),
-                    if (_isOutputExpanded)
-                      Container(
-                        // Increased height for better visibility
-                        height: 300,
-                        padding: EdgeInsets.all(8.0),
-                        color: Colors.red[50],
-                        child: SingleChildScrollView(
-                          child: SelectableText(
-                            _generatedYamlMessage,
-                            style: TextStyle(fontFamily: 'monospace'),
-                          ),
-                        ),
-                      ),
+                    SizedBox(width: 8),
+                    ChoiceChip(
+                      label: Text('Tree View'),
+                      selected: _selectedViewIndex == 1,
+                      onSelected: (selected) {
+                        if (selected) setState(() => _selectedViewIndex = 1);
+                      },
+                    ),
                   ],
                 ),
               ),
 
-            // Files Section - Only show after YAML is loaded
+            // Files display section
             if (hasYaml)
               Expanded(
-                child: _buildExportFilesView(),
+                child: _selectedViewIndex == 0
+                    ? _buildExportFilesView() // Show edited files view
+                    : _buildTreeView(), // Show tree view with integrated file editor
               ),
           ],
         ),
@@ -1511,7 +916,251 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Build the export files view
+  // New method to build the tree view
+  Widget _buildTreeView() {
+    return YamlTreeView(
+      yamlFiles: _exportedFiles,
+      onFileEdited: (String filePath, String newContent) {
+        // When a file is edited in the tree view, update it
+        _applyFileChanges(filePath, newContent);
+      },
+      originalFiles: _originalFiles,
+    );
+  }
+
+  // Existing method renamed for clarity
+  Widget _buildFlatFileListView() {
+    // Use changedFiles if modifications were made, otherwise use exportedFiles
+    Map<String, String> filesToShow =
+        _hasModifications ? _changedFiles : _exportedFiles;
+
+    // Make sure our key files are shown first
+    List<String> orderedKeys = filesToShow.keys.toList();
+
+    // Add modified_yaml.yaml first if it exists
+    if (_hasModifications) {
+      orderedKeys.sort((a, b) {
+        // Give priority to the modified_yaml.yaml file
+        if (a == 'modified_yaml.yaml') return -1;
+        if (b == 'modified_yaml.yaml') return 1;
+        if (a == 'raw_output.yaml') return -1;
+        if (b == 'raw_output.yaml') return 1;
+        return a.compareTo(b);
+      });
+    } else {
+      orderedKeys.sort((a, b) {
+        // Show archive files first
+        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
+        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
+        // Then show complete raw
+        if (a.contains('complete_raw.yaml')) return -1;
+        if (b.contains('complete_raw.yaml')) return 1;
+        if (a.contains('raw_project.yaml')) return -1;
+        if (b.contains('raw_project.yaml')) return 1;
+        return a.compareTo(b);
+      });
+    }
+
+    // Count modified files for the badge
+    int modifiedFilesCount = 0;
+    for (var fileName in orderedKeys) {
+      String content = filesToShow[fileName] ?? '';
+
+      // Check if file is modified
+      if (_originalFiles.containsKey(fileName) &&
+          _originalFiles[fileName] != content) {
+        modifiedFilesCount++;
+      }
+    }
+
+    String statusMessage = "Found ${orderedKeys.length} files";
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Text(statusMessage),
+        ),
+        Expanded(
+          child: filesToShow.isEmpty
+              ? Center(
+                  child: Text(
+                      'No YAML files available. ${_parsedYamlMap != null ? "Enter a prompt to make changes." : ""}'),
+                )
+              : ListView.builder(
+                  itemCount: orderedKeys.length,
+                  itemBuilder: (context, index) {
+                    String fileName = orderedKeys[index];
+
+                    String fileContent = filesToShow[fileName] ?? '';
+                    bool isExpanded = _expandedFiles.contains(fileName);
+
+                    // Debug file sizes
+                    print(
+                        'DEBUG: File "$fileName" size: ${fileContent.length} chars');
+
+                    // Determine if file was deleted
+                    bool isDeleted = fileContent ==
+                        "# This file was removed in the latest changes";
+
+                    // Highlight the complete raw file
+                    bool isCompleteRaw =
+                        fileName.contains('complete_raw.yaml') ||
+                            fileName.contains('ALL_CONTENT_COMBINED');
+
+                    // Highlight archive files
+                    bool isArchiveFile = fileName.startsWith('archive_');
+
+                    // Prepare or get a TextEditingController for this file if needed
+                    if (!_fileControllers.containsKey(fileName)) {
+                      _fileControllers[fileName] =
+                          TextEditingController(text: fileContent);
+                    }
+
+                    bool isEditing = _fileEditModes[fileName] == true;
+                    bool wasModified = _originalFiles.containsKey(fileName) &&
+                        _originalFiles[fileName] != fileContent;
+
+                    // Get background color based on file type and modified status
+                    Color? bgColor;
+
+                    if (wasModified) {
+                      bgColor = Colors.yellow[50]; // Highlight modified files
+                    } else if (isCompleteRaw) {
+                      bgColor = Colors.blue[50]; // Highlight complete raw file
+                    } else if (isArchiveFile) {
+                      bgColor =
+                          Colors.grey[50]; // Subtle highlight for archive files
+                    }
+
+                    return Card(
+                      color: bgColor,
+                      margin: EdgeInsets.all(4.0),
+                      child: ExpansionTile(
+                        key: Key(
+                            fileName), // Use a key to maintain expansion state
+                        initiallyExpanded: isExpanded,
+                        onExpansionChanged: (expanded) {
+                          setState(() {
+                            if (expanded) {
+                              _expandedFiles.add(fileName);
+                            } else {
+                              _expandedFiles.remove(fileName);
+                            }
+                          });
+                        },
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                fileName,
+                                style: TextStyle(
+                                  fontWeight: wasModified || isCompleteRaw
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                            if (wasModified)
+                              Chip(
+                                label: Text('Modified'),
+                                backgroundColor: Colors.yellow[100],
+                                labelStyle: TextStyle(fontSize: 10),
+                                padding: EdgeInsets.zero,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                          ],
+                        ),
+                        subtitle: Text(
+                          '${fileContent.length} characters',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: isEditing
+                                ? Column(
+                                    children: [
+                                      TextField(
+                                        controller: _fileControllers[fileName],
+                                        maxLines: null,
+                                        decoration: InputDecoration(
+                                          border: OutlineInputBorder(),
+                                          filled: true,
+                                          fillColor: Colors.white,
+                                        ),
+                                        style:
+                                            TextStyle(fontFamily: 'monospace'),
+                                      ),
+                                      SizedBox(height: 8),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceEvenly,
+                                        children: [
+                                          ElevatedButton(
+                                            onPressed: () {
+                                              _applyFileChanges(
+                                                  fileName,
+                                                  _fileControllers[fileName]!
+                                                      .text);
+                                              setState(() {
+                                                _fileEditModes[fileName] =
+                                                    false;
+                                              });
+                                            },
+                                            child: Text('Save'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () {
+                                              setState(() {
+                                                _fileEditModes[fileName] =
+                                                    false;
+                                                _fileControllers[fileName]!
+                                                        .text =
+                                                    filesToShow[fileName] ?? '';
+                                              });
+                                            },
+                                            child: Text('Cancel'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  )
+                                : GestureDetector(
+                                    onTap: () {
+                                      // Enter edit mode when text is clicked
+                                      setState(() {
+                                        _fileEditModes[fileName] = true;
+                                        _fileControllers[fileName]!.text =
+                                            fileContent;
+                                      });
+                                    },
+                                    child: Container(
+                                      color: Colors
+                                          .transparent, // Makes the entire area tappable
+                                      width: double.infinity,
+                                      child: SingleChildScrollView(
+                                        child: Text(
+                                          fileContent,
+                                          style: TextStyle(
+                                              fontFamily: 'monospace'),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  // Existing method for the export files view
   Widget _buildExportFilesView() {
     // Use changedFiles if modifications were made, otherwise use exportedFiles
     Map<String, String> filesToShow =
@@ -1557,22 +1206,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // Find the largest file for the quick copy button
-    String largestFileName = "";
-    int largestFileSize = 0;
-
-    for (var fileName in orderedKeys) {
-      String content = filesToShow[fileName] ?? '';
-      if (content.length > largestFileSize) {
-        largestFileSize = content.length;
-        largestFileName = fileName;
-      }
-    }
-
     String statusMessage = "Found ${orderedKeys.length} files";
-    if (largestFileSize > 0) {
-      statusMessage += " (largest: ${largestFileSize} chars)";
-    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1607,38 +1241,6 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(statusMessage,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600])),
             Spacer(),
-            Row(
-              children: [
-                Text('Show Detailed Files:', style: TextStyle(fontSize: 12)),
-                Switch(
-                  value: _showDetailedFiles,
-                  onChanged: (value) {
-                    setState(() {
-                      _showDetailedFiles = value;
-                    });
-                  },
-                  activeColor: Colors.green,
-                ),
-                SizedBox(width: 8),
-                if (largestFileSize > 0)
-                  ElevatedButton.icon(
-                    icon: Icon(Icons.file_copy, size: 14),
-                    label: Text('Copy Largest File',
-                        style: TextStyle(fontSize: 12)),
-                    onPressed: () {
-                      String content = filesToShow[largestFileName] ?? '';
-                      if (content.isNotEmpty) {
-                        _fallbackClipboardCopy(
-                            context, largestFileName, content);
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      backgroundColor: Colors.deepPurple,
-                    ),
-                  ),
-              ],
-            ),
           ],
         ),
         SizedBox(height: 8),
@@ -1652,17 +1254,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemCount: orderedKeys.length,
                   itemBuilder: (context, index) {
                     String fileName = orderedKeys[index];
-
-                    // Skip detailed files if filter is enabled
-                    if (!_showDetailedFiles) {
-                      // Skip deeply nested files but keep important ones
-                      if (fileName.startsWith('archive_') &&
-                          !fileName.contains('ALL_CONTENT_COMBINED') &&
-                          fileName.contains('/') &&
-                          fileName.split('/').length > 3) {
-                        return SizedBox.shrink(); // Invisible widget
-                      }
-                    }
 
                     String fileContent = filesToShow[fileName] ?? '';
                     bool isExpanded = _expandedFiles.contains(fileName);
@@ -1797,15 +1388,29 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                   Row(
                                     children: [
-                                      // Allow editing for non-archive files
-                                      if (!isArchiveFile && isExpanded)
+                                      // Allow editing for all files when expanded
+                                      if (isExpanded)
                                         IconButton(
-                                          icon: Icon(
-                                            isEditing ? Icons.save : Icons.edit,
-                                            size: 18,
-                                            color:
-                                                isEditing ? Colors.green : null,
-                                          ),
+                                          icon: isEditing
+                                              ? Container(
+                                                  padding: EdgeInsets.all(4),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.green[100],
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            4),
+                                                  ),
+                                                  child: Icon(
+                                                    Icons.save,
+                                                    size: 20,
+                                                    color: Colors.green[800],
+                                                  ),
+                                                )
+                                              : Icon(
+                                                  Icons.edit,
+                                                  size: 18,
+                                                  color: null,
+                                                ),
                                           tooltip: isEditing
                                               ? 'Save changes'
                                               : 'Edit file',
@@ -1881,11 +1486,26 @@ class _HomeScreenState extends State<HomeScreen> {
                                         fontSize: 14,
                                       ),
                                     )
-                                  : SingleChildScrollView(
-                                      child: SelectableText(
-                                        fileContent,
-                                        style:
-                                            TextStyle(fontFamily: 'monospace'),
+                                  : GestureDetector(
+                                      onTap: () {
+                                        // Enter edit mode when text is clicked
+                                        setState(() {
+                                          _fileEditModes[fileName] = true;
+                                          _fileControllers[fileName]!.text =
+                                              fileContent;
+                                        });
+                                      },
+                                      child: Container(
+                                        color: Colors
+                                            .transparent, // Makes the entire area tappable
+                                        width: double.infinity,
+                                        child: SingleChildScrollView(
+                                          child: Text(
+                                            fileContent,
+                                            style: TextStyle(
+                                                fontFamily: 'monospace'),
+                                          ),
+                                        ),
                                       ),
                                     ),
                             ),
@@ -1898,14 +1518,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ],
     );
-  }
-
-  Future<void> _handleFetchOrGenerate() async {
-    if (_rawFetchedYaml == null || _parsedYamlMap == null) {
-      await _fetchProjectYaml();
-    } else {
-      _processPromptAndGenerateYaml();
-    }
   }
 
   // Helper to export YAML to multiple files
@@ -1925,6 +1537,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'DEBUG: In modification mode with no archive files, skipping file regeneration');
 
       // Just make sure the _changedFiles are populated
+      _changedFiles.clear();
       _changedFiles = Map<String, String>.from(_exportedFiles);
       return;
     }

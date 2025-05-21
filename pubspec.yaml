@@ -16,6 +16,7 @@ dependencies:
   archive: ^3.4.9 # Added archive package
   shared_preferences: ^2.2.2 # For storing API keys and recent projects
   intl: ^0.18.1 # For date formatting
+  path: ^1.8.3 # For path manipulation
 
   cupertino_icons: ^1.0.2
 
