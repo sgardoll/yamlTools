@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'screens/home_screen.dart'; // Assuming HomeScreen will be in lib/screens
 
 void main() {
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({Key? key}) : super(key: key);
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'FlutterFlow YAML Tools',
       theme: ThemeData(
         primarySwatch: Colors.blue,
+        useMaterial3: false, // Ensure consistent icon rendering
       ),
       home: HomeScreen(),
     );

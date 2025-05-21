@@ -352,11 +352,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _selectedFilePath!.replaceFirst('archive_', ''),
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      // Only show characters count, not the filename
                       Text(
                         '${_fileController.text.length} characters',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
@@ -482,8 +478,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                           originalContent:
                               widget.originalFiles![_selectedFilePath!] ?? '',
                           modifiedContent: _fileController.text,
-                          fileName:
-                              _selectedFilePath!.replaceFirst('archive_', ''),
+                          fileName: '', // Empty to avoid duplication
                           onClose: null, // Keep it open in the tree view
                         )
                       : GestureDetector(

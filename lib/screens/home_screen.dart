@@ -779,37 +779,17 @@ class _HomeScreenState extends State<HomeScreen> {
                       SizedBox(width: 8),
                       Row(
                         children: [
-                          ElevatedButton(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.edit,
-                                  size: 16,
-                                  color: Colors.white,
-                                  shadows: [
-                                    Shadow(
-                                      color: Colors.black38,
-                                      blurRadius: 2,
-                                      offset: Offset(0, 1),
-                                    ),
-                                  ],
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Edit',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    shadows: [
-                                      Shadow(
-                                        color: Colors.black38,
-                                        blurRadius: 2,
-                                        offset: Offset(0, 1),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                          ElevatedButton.icon(
+                            icon: Icon(
+                              Icons.edit,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                            label: Text(
+                              'Edit',
+                              style: TextStyle(
+                                fontSize: 12,
+                              ),
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.blue,
@@ -826,57 +806,44 @@ class _HomeScreenState extends State<HomeScreen> {
                             },
                           ),
                           SizedBox(width: 8),
-                          IconButton(
+                          ElevatedButton.icon(
                             icon: Icon(
                               Icons.history,
-                              size: 20,
-                              color: Colors.orange,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.black38,
-                                  blurRadius: 2,
-                                  offset: Offset(0, 1),
-                                ),
-                              ],
+                              size: 16,
+                              color: Colors.white,
                             ),
-                            tooltip: 'Recent projects',
+                            label: Text(
+                              'Recent',
+                              style: TextStyle(
+                                fontSize: 12,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
+                              elevation: 3,
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 0),
+                              minimumSize: Size(0, 32),
+                            ),
                             onPressed: () {
                               setState(() {
                                 _showRecentProjects = true;
                               });
                             },
                           ),
-                          ElevatedButton(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.refresh,
-                                  size: 16,
-                                  color: Colors.white,
-                                  shadows: [
-                                    Shadow(
-                                      color: Colors.black38,
-                                      blurRadius: 2,
-                                      offset: Offset(0, 1),
-                                    ),
-                                  ],
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Reload',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    shadows: [
-                                      Shadow(
-                                        color: Colors.black38,
-                                        blurRadius: 2,
-                                        offset: Offset(0, 1),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                          SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            icon: Icon(
+                              Icons.refresh,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                            label: Text(
+                              'Reload',
+                              style: TextStyle(
+                                fontSize: 12,
+                              ),
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
@@ -1250,17 +1217,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceEvenly,
                                         children: [
-                                          ElevatedButton(
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(Icons.save,
-                                                    size: 16,
-                                                    color: Colors.white),
-                                                SizedBox(width: 4),
-                                                Text('Save'),
-                                              ],
-                                            ),
+                                          ElevatedButton.icon(
+                                            icon: Icon(Icons.save,
+                                                size: 16, color: Colors.white),
+                                            label: Text('Save'),
                                             style: ElevatedButton.styleFrom(
                                               backgroundColor: Colors.green,
                                               foregroundColor: Colors.white,
@@ -1276,17 +1236,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                               });
                                             },
                                           ),
-                                          TextButton(
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(Icons.cancel,
-                                                    size: 16,
-                                                    color: Colors.red),
-                                                SizedBox(width: 4),
-                                                Text('Cancel'),
-                                              ],
-                                            ),
+                                          TextButton.icon(
+                                            icon: Icon(Icons.cancel,
+                                                size: 16, color: Colors.red),
+                                            label: Text('Cancel'),
                                             style: TextButton.styleFrom(
                                               foregroundColor: Colors.red,
                                             ),
@@ -1573,18 +1526,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                       // Allow editing for all files when expanded
                                       if (isExpanded)
                                         isEditing
-                                            ? ElevatedButton(
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Icon(Icons.save,
-                                                        size: 16,
-                                                        color: Colors.white),
-                                                    SizedBox(width: 4),
-                                                    Text('Save'),
-                                                  ],
-                                                ),
+                                            ? ElevatedButton.icon(
+                                                icon: Icon(Icons.save,
+                                                    size: 16,
+                                                    color: Colors.white),
+                                                label: Text('Save'),
                                                 style: ElevatedButton.styleFrom(
                                                   backgroundColor: Colors.green,
                                                   foregroundColor: Colors.white,
@@ -1601,40 +1547,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                                   });
                                                 },
                                               )
-                                            : ElevatedButton(
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.edit,
-                                                      size: 16,
-                                                      color: Colors.white,
-                                                      shadows: [
-                                                        Shadow(
-                                                          color: Colors.black38,
-                                                          blurRadius: 2,
-                                                          offset: Offset(0, 1),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    SizedBox(width: 4),
-                                                    Text(
-                                                      'Edit',
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        shadows: [
-                                                          Shadow(
-                                                            color:
-                                                                Colors.black38,
-                                                            blurRadius: 2,
-                                                            offset:
-                                                                Offset(0, 1),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ],
+                                            : ElevatedButton.icon(
+                                                icon: Icon(
+                                                  Icons.edit,
+                                                  size: 16,
+                                                  color: Colors.white,
+                                                ),
+                                                label: Text(
+                                                  'Edit',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                  ),
                                                 ),
                                                 style: ElevatedButton.styleFrom(
                                                   backgroundColor: Colors.blue,
@@ -1656,17 +1579,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 },
                                               ),
                                       // Copy button
-                                      ElevatedButton(
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(Icons.copy,
-                                                size: 16, color: Colors.white),
-                                            SizedBox(width: 4),
-                                            Text('Copy',
-                                                style: TextStyle(fontSize: 12)),
-                                          ],
-                                        ),
+                                      ElevatedButton.icon(
+                                        icon: Icon(Icons.copy,
+                                            size: 16, color: Colors.white),
+                                        label: Text('Copy',
+                                            style: TextStyle(fontSize: 12)),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: Colors.blue,
                                           foregroundColor: Colors.white,
@@ -1681,17 +1598,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                       SizedBox(width: 8),
                                       // Make View button more prominent
-                                      ElevatedButton(
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(Icons.visibility,
-                                                size: 16, color: Colors.white),
-                                            SizedBox(width: 4),
-                                            Text('View',
-                                                style: TextStyle(fontSize: 12)),
-                                          ],
-                                        ),
+                                      ElevatedButton.icon(
+                                        icon: Icon(Icons.visibility,
+                                            size: 16, color: Colors.white),
+                                        label: Text('View',
+                                            style: TextStyle(fontSize: 12)),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: Colors.green,
                                           foregroundColor: Colors.white,
@@ -2090,45 +2001,21 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildTopBarSystemFileButton(String displayName, String filePath) {
     return Padding(
       padding: const EdgeInsets.only(right: 8.0),
-      child: ElevatedButton(
-        // Don't use icon parameter, manually add Row with Icon and Text for better control
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Improve icon visibility with explicit coloring and size
-            Icon(
-              Icons.description,
-              size: 16,
-              color: Colors.white,
-              // Add shadow to improve contrast against any background
-              shadows: [
-                Shadow(
-                  color: Colors.black38,
-                  blurRadius: 2,
-                  offset: Offset(0, 1),
-                ),
-              ],
-            ),
-            SizedBox(width: 4),
-            Text(
-              displayName.replaceAll('.yaml', ''),
-              style: TextStyle(
-                fontSize: 12,
-                shadows: [
-                  Shadow(
-                    color: Colors.black38,
-                    blurRadius: 2,
-                    offset: Offset(0, 1),
-                  ),
-                ],
-              ),
-            ),
-          ],
+      child: ElevatedButton.icon(
+        icon: Icon(
+          Icons.description,
+          size: 16,
+          color: Colors.white,
+        ),
+        label: Text(
+          displayName.replaceAll('.yaml', ''),
+          style: TextStyle(
+            fontSize: 12,
+          ),
         ),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.blue,
           foregroundColor: Colors.white,
-          // Add elevation for better visibility
           elevation: 3,
           padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
           minimumSize: Size(0, 32),

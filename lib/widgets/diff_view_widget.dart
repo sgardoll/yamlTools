@@ -23,44 +23,50 @@ class DiffViewWidget extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Header with filename and controls
-        Container(
-          color: Colors.grey[200],
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  fileName,
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
+        // Header with filename and controls - only show if onClose is provided
+        // This avoids duplication when used inside the tree view
+        if (onClose != null)
+          Container(
+            color: Colors.grey[200],
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    fileName,
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.copy),
-                tooltip: 'Copy modified content',
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: modifiedContent));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Modified content copied to clipboard'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                },
-              ),
-              if (onClose != null)
                 IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: onClose,
+                  icon: const Icon(Icons.copy),
+                  tooltip: 'Copy modified content',
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: modifiedContent));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Modified content copied to clipboard'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
                 ),
-            ],
+                if (onClose != null)
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    padding: EdgeInsets.zero,
+                    constraints: BoxConstraints(),
+                    onPressed: onClose,
+                  ),
+              ],
+            ),
           ),
-        ),
         
         // Diff header
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
             children: [
               Expanded(
@@ -109,7 +115,7 @@ class DiffViewWidget extends StatelessWidget {
             // Empty space for the original side
             Expanded(
               child: Container(
-                padding: EdgeInsets.all(4),
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 decoration: BoxDecoration(
                   border: Border(right: BorderSide(color: Colors.grey[300]!)),
                 ),
@@ -118,13 +124,13 @@ class DiffViewWidget extends StatelessWidget {
             // Added content on the modified side
             Expanded(
               child: Container(
-                padding: EdgeInsets.all(4),
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 color: backgroundColor,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('+', style: TextStyle(color: Colors.green[800])),
-                    SizedBox(width: 8),
+                    SizedBox(width: 4),
                     Expanded(
                       child: Text(
                         line.content,
@@ -146,13 +152,13 @@ class DiffViewWidget extends StatelessWidget {
             // Removed content on the original side
             Expanded(
               child: Container(
-                padding: EdgeInsets.all(4),
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 color: backgroundColor,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('-', style: TextStyle(color: Colors.red[800])),
-                    SizedBox(width: 8),
+                    SizedBox(width: 4),
                     Expanded(
                       child: Text(
                         line.content,
@@ -166,7 +172,7 @@ class DiffViewWidget extends StatelessWidget {
             // Empty space for the modified side
             Expanded(
               child: Container(
-                padding: EdgeInsets.all(4),
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 decoration: BoxDecoration(
                   border: Border(left: BorderSide(color: Colors.grey[300]!)),
                 ),
@@ -183,7 +189,7 @@ class DiffViewWidget extends StatelessWidget {
             // Same content on both sides
             Expanded(
               child: Container(
-                padding: EdgeInsets.all(4),
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 child: Text(
                   line.content,
                   style: TextStyle(fontFamily: 'monospace', color: Colors.grey[700]),
@@ -192,7 +198,7 @@ class DiffViewWidget extends StatelessWidget {
             ),
             Expanded(
               child: Container(
-                padding: EdgeInsets.all(4),
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 child: Text(
                   line.content,
                   style: TextStyle(fontFamily: 'monospace', color: Colors.grey[700]),
