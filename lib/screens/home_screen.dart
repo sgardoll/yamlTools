@@ -876,43 +876,25 @@ class _HomeScreenState extends State<HomeScreen> {
                           Text('FlutterFlow Credentials',
                               style: TextStyle(
                                   fontSize: 16, fontWeight: FontWeight.bold)),
-                          ElevatedButton(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.history,
-                                  size: 16,
-                                  color: Colors.white,
-                                  shadows: [
-                                    Shadow(
-                                      color: Colors.black38,
-                                      blurRadius: 2,
-                                      offset: Offset(0, 1),
-                                    ),
-                                  ],
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Recent',
-                                  style: TextStyle(
-                                    shadows: [
-                                      Shadow(
-                                        color: Colors.black38,
-                                        blurRadius: 2,
-                                        offset: Offset(0, 1),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                          ElevatedButton.icon(
+                            icon: Icon(
+                              Icons.history,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                            label: Text(
+                              'Recent',
+                              style: TextStyle(
+                                fontSize: 12,
+                              ),
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.blue,
                               foregroundColor: Colors.white,
                               elevation: 3,
                               padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
+                                  horizontal: 8, vertical: 0),
+                              minimumSize: Size(0, 32),
                             ),
                             onPressed: () {
                               setState(() {
