@@ -55,7 +55,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _projectName = "";
 
   // Add a new state field to track which view is active
-  int _selectedViewIndex = 0; // 0: export view, 1: tree view
+  int _selectedViewIndex =
+      1; // 0: export view, 1: tree view (changed to default to tree view)
 
   // Add a new state field for loading indicator
   bool _isLoading = false;
@@ -688,7 +689,7 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           if (hasYaml)
             IconButton(
-              icon: Icon(Icons.refresh),
+              icon: Icon(Icons.refresh, color: Colors.blue),
               tooltip: 'Reload YAML',
               onPressed: hasCredentials ? _fetchProjectYaml : null,
             ),
@@ -719,7 +720,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.close),
+                              icon: const Icon(Icons.close, color: Colors.grey),
                               onPressed: () {
                                 setState(() {
                                   _showRecentProjects = false;
@@ -760,19 +761,50 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
+                      // Add system file buttons here
+                      if (_exportedFiles.keys
+                          .any((f) => f.contains('complete_raw.yaml')))
+                        _buildTopBarSystemFileButton(
+                          'complete_raw.yaml',
+                          _exportedFiles.keys.firstWhere(
+                              (f) => f.contains('complete_raw.yaml')),
+                        ),
+                      if (_exportedFiles.keys
+                          .any((f) => f.contains('raw_project.yaml')))
+                        _buildTopBarSystemFileButton(
+                          'raw_project.yaml',
+                          _exportedFiles.keys.firstWhere(
+                              (f) => f.contains('raw_project.yaml')),
+                        ),
+                      SizedBox(width: 8),
                       Row(
                         children: [
-                          IconButton(
-                            icon: Icon(Icons.edit, size: 18),
-                            tooltip: 'Edit credentials',
+                          ElevatedButton(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.edit, size: 16, color: Colors.white),
+                                SizedBox(width: 4),
+                                Text('Edit', style: TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 0),
+                              minimumSize: Size(0, 32),
+                            ),
                             onPressed: () {
                               setState(() {
                                 _collapseCredentials = false;
                               });
                             },
                           ),
+                          SizedBox(width: 8),
                           IconButton(
-                            icon: Icon(Icons.history, size: 18),
+                            icon: Icon(Icons.history,
+                                size: 20, color: Colors.orange),
                             tooltip: 'Recent projects',
                             onPressed: () {
                               setState(() {
@@ -780,9 +812,23 @@ class _HomeScreenState extends State<HomeScreen> {
                               });
                             },
                           ),
-                          IconButton(
-                            icon: Icon(Icons.refresh, size: 18),
-                            tooltip: 'Reload',
+                          ElevatedButton(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.refresh,
+                                    size: 16, color: Colors.white),
+                                SizedBox(width: 4),
+                                Text('Reload', style: TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 0),
+                              minimumSize: Size(0, 32),
+                            ),
                             onPressed:
                                 hasCredentials ? _fetchProjectYaml : null,
                           ),
@@ -806,10 +852,19 @@ class _HomeScreenState extends State<HomeScreen> {
                           Text('FlutterFlow Credentials',
                               style: TextStyle(
                                   fontSize: 16, fontWeight: FontWeight.bold)),
-                          ElevatedButton.icon(
-                            icon: const Icon(Icons.history, size: 16),
-                            label: const Text('Recent'),
+                          ElevatedButton(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.history,
+                                    size: 16, color: Colors.white),
+                                SizedBox(width: 4),
+                                Text('Recent'),
+                              ],
+                            ),
                             style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
                               padding: EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 4),
                             ),
@@ -853,7 +908,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                         Text('Fetching...'),
                                       ],
                                     )
-                                  : Text('Fetch YAML'),
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.download,
+                                            color: Colors.white),
+                                        SizedBox(width: 8),
+                                        Text('Fetch YAML'),
+                                      ],
+                                    ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                              ),
                             ),
                           ),
                           if (hasYaml) ...[
@@ -925,6 +992,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _applyFileChanges(filePath, newContent);
       },
       originalFiles: _originalFiles,
+      expandedFiles: _expandedFiles, // Pass the expanded files set
     );
   }
 
@@ -934,8 +1002,13 @@ class _HomeScreenState extends State<HomeScreen> {
     Map<String, String> filesToShow =
         _hasModifications ? _changedFiles : _exportedFiles;
 
+    // Filter out system files that we're now showing in the top bar
+    Map<String, String> filteredFiles = Map.from(filesToShow);
+    filteredFiles.removeWhere((key, value) =>
+        key.contains('complete_raw.yaml') || key.contains('raw_project.yaml'));
+
     // Make sure our key files are shown first
-    List<String> orderedKeys = filesToShow.keys.toList();
+    List<String> orderedKeys = filteredFiles.keys.toList();
 
     // Add modified_yaml.yaml first if it exists
     if (_hasModifications) {
@@ -949,12 +1022,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } else {
       orderedKeys.sort((a, b) {
-        // Show complete raw first
-        if (a.contains('complete_raw.yaml')) return -1;
-        if (b.contains('complete_raw.yaml')) return 1;
-        if (a.contains('raw_project.yaml')) return -1;
-        if (b.contains('raw_project.yaml')) return 1;
-        // Then show archive files
+        // Show archive files first
         if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
         if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
         return a.compareTo(b);
@@ -992,12 +1060,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, index) {
                     String fileName = orderedKeys[index];
 
-                    // Special compact treatment for important files
-                    if (fileName.contains('complete_raw.yaml') ||
-                        fileName.contains('raw_project.yaml')) {
-                      return _buildCompactFileCard(
-                          fileName, filesToShow[fileName] ?? '');
-                    }
+                    // Skip compact treatment for system files since they're now in the top bar
+                    // if (fileName.contains('complete_raw.yaml') ||
+                    //     fileName.contains('raw_project.yaml')) {
+                    //   return _buildCompactFileCard(
+                    //       fileName, filesToShow[fileName] ?? '');
+                    // }
 
                     String fileContent = filesToShow[fileName] ?? '';
                     bool isExpanded = _expandedFiles.contains(fileName);
@@ -1103,9 +1171,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceEvenly,
                                         children: [
-                                          ElevatedButton.icon(
-                                            icon: Icon(Icons.save),
-                                            label: Text('Save'),
+                                          ElevatedButton(
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.save,
+                                                    size: 16,
+                                                    color: Colors.white),
+                                                SizedBox(width: 4),
+                                                Text('Save'),
+                                              ],
+                                            ),
                                             style: ElevatedButton.styleFrom(
                                               backgroundColor: Colors.green,
                                               foregroundColor: Colors.white,
@@ -1121,9 +1197,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                               });
                                             },
                                           ),
-                                          TextButton.icon(
-                                            icon: Icon(Icons.cancel),
-                                            label: Text('Cancel'),
+                                          TextButton(
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.cancel,
+                                                    size: 16,
+                                                    color: Colors.red),
+                                                SizedBox(width: 4),
+                                                Text('Cancel'),
+                                              ],
+                                            ),
                                             style: TextButton.styleFrom(
                                               foregroundColor: Colors.red,
                                             ),
@@ -1180,8 +1264,13 @@ class _HomeScreenState extends State<HomeScreen> {
     Map<String, String> filesToShow =
         _hasModifications ? _changedFiles : _exportedFiles;
 
+    // Filter out system files that we're now showing in the top bar
+    Map<String, String> filteredFiles = Map.from(filesToShow);
+    filteredFiles.removeWhere((key, value) =>
+        key.contains('complete_raw.yaml') || key.contains('raw_project.yaml'));
+
     // Make sure our key files are shown first
-    List<String> orderedKeys = filesToShow.keys.toList();
+    List<String> orderedKeys = filteredFiles.keys.toList();
 
     // Add modified_yaml.yaml first if it exists
     if (_hasModifications) {
@@ -1195,12 +1284,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } else {
       orderedKeys.sort((a, b) {
-        // Show complete raw first
-        if (a.contains('complete_raw.yaml')) return -1;
-        if (b.contains('complete_raw.yaml')) return 1;
-        if (a.contains('raw_project.yaml')) return -1;
-        if (b.contains('raw_project.yaml')) return 1;
-        // Then show archive files
+        // Show archive files first
         if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
         if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
         return a.compareTo(b);
@@ -1269,12 +1353,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, index) {
                     String fileName = orderedKeys[index];
 
-                    // Special compact treatment for important files
-                    if (fileName.contains('complete_raw.yaml') ||
-                        fileName.contains('raw_project.yaml')) {
-                      return _buildCompactFileCard(
-                          fileName, filesToShow[fileName] ?? '');
-                    }
+                    // Skip compact treatment for system files since they're now in the top bar
+                    // if (fileName.contains('complete_raw.yaml') ||
+                    //     fileName.contains('raw_project.yaml')) {
+                    //   return _buildCompactFileCard(
+                    //       fileName, filesToShow[fileName] ?? '');
+                    // }
 
                     String fileContent = filesToShow[fileName] ?? '';
                     bool isExpanded = _expandedFiles.contains(fileName);
@@ -1410,45 +1494,51 @@ class _HomeScreenState extends State<HomeScreen> {
                                       // Allow editing for all files when expanded
                                       if (isExpanded)
                                         isEditing
-                                            ? ElevatedButton.icon(
-                                                icon:
-                                                    Icon(Icons.save, size: 18),
-                                                label: Text('Save',
-                                                    style: TextStyle(
-                                                        fontSize: 12)),
+                                            ? ElevatedButton(
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.save,
+                                                        size: 16,
+                                                        color: Colors.white),
+                                                    SizedBox(width: 4),
+                                                    Text('Save'),
+                                                  ],
+                                                ),
                                                 style: ElevatedButton.styleFrom(
                                                   backgroundColor: Colors.green,
                                                   foregroundColor: Colors.white,
-                                                  padding: EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 0),
-                                                  minimumSize: Size(0, 32),
                                                 ),
                                                 onPressed: () {
-                                                  // Get updated content
-                                                  String newContent =
+                                                  _applyFileChanges(
+                                                      fileName,
                                                       _fileControllers[
                                                               fileName]!
-                                                          .text;
-
-                                                  // Apply changes using our helper method
-                                                  _applyFileChanges(
-                                                      fileName, newContent);
-
-                                                  // Exit edit mode
+                                                          .text);
                                                   setState(() {
                                                     _fileEditModes[fileName] =
                                                         false;
                                                   });
                                                 },
                                               )
-                                            : ElevatedButton.icon(
-                                                icon:
-                                                    Icon(Icons.edit, size: 18),
-                                                label: Text('Edit',
-                                                    style: TextStyle(
-                                                        fontSize: 12)),
+                                            : ElevatedButton(
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.edit,
+                                                        size: 16,
+                                                        color: Colors.white),
+                                                    SizedBox(width: 4),
+                                                    Text('Edit',
+                                                        style: TextStyle(
+                                                            fontSize: 12)),
+                                                  ],
+                                                ),
                                                 style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.blue,
+                                                  foregroundColor: Colors.white,
                                                   padding: EdgeInsets.symmetric(
                                                       horizontal: 8,
                                                       vertical: 0),
@@ -1465,12 +1555,57 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 },
                                               ),
                                       // Copy button
-                                      IconButton(
-                                        icon: Icon(Icons.copy, size: 18),
-                                        tooltip: 'Copy content',
+                                      ElevatedButton(
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.copy,
+                                                size: 16, color: Colors.white),
+                                            SizedBox(width: 4),
+                                            Text('Copy',
+                                                style: TextStyle(fontSize: 12)),
+                                          ],
+                                        ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.blue,
+                                          foregroundColor: Colors.white,
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 0),
+                                          minimumSize: Size(0, 32),
+                                        ),
                                         onPressed: () {
                                           _fallbackClipboardCopy(
                                               context, fileName, fileContent);
+                                        },
+                                      ),
+                                      SizedBox(width: 8),
+                                      // Make View button more prominent
+                                      ElevatedButton(
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.visibility,
+                                                size: 16, color: Colors.white),
+                                            SizedBox(width: 4),
+                                            Text('View',
+                                                style: TextStyle(fontSize: 12)),
+                                          ],
+                                        ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.green,
+                                          foregroundColor: Colors.white,
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 0),
+                                          minimumSize: Size(0, 32),
+                                        ),
+                                        onPressed: () {
+                                          // Switch to tree view and select this file
+                                          setState(() {
+                                            _selectedViewIndex =
+                                                1; // Switch to tree view
+                                            _expandedFiles.add(
+                                                fileName); // Mark as expanded
+                                          });
                                         },
                                       ),
                                     ],
@@ -1825,17 +1960,15 @@ class _HomeScreenState extends State<HomeScreen> {
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
             SizedBox(width: 8),
-            IconButton(
-              icon: Icon(Icons.copy, size: 16),
-              tooltip: 'Copy content',
-              onPressed: () {
-                _fallbackClipboardCopy(context, fileName, content);
-              },
-            ),
-            // Make View button more prominent
-            ElevatedButton.icon(
-              icon: Icon(Icons.visibility, size: 16),
-              label: Text('View', style: TextStyle(fontSize: 12)),
+            ElevatedButton(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.copy, size: 16, color: Colors.white),
+                  SizedBox(width: 4),
+                  Text('Copy', style: TextStyle(fontSize: 12)),
+                ],
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
                 foregroundColor: Colors.white,
@@ -1843,27 +1976,45 @@ class _HomeScreenState extends State<HomeScreen> {
                 minimumSize: Size(0, 32),
               ),
               onPressed: () {
-                setState(() {
-                  if (_expandedFiles.contains(fileName)) {
-                    _expandedFiles.remove(fileName);
-                  } else {
-                    _expandedFiles.add(fileName);
-                  }
-                });
-
-                // Find the correct list view item and scroll to it
-                Future.delayed(Duration(milliseconds: 100), () {
-                  // This is a basic approach - you may need a more sophisticated solution
-                  // depending on your specific implementation
-                  Scrollable.ensureVisible(
-                    context,
-                    duration: Duration(milliseconds: 300),
-                  );
-                });
+                _fallbackClipboardCopy(context, fileName, content);
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // Add new helper method for system file buttons in the top bar
+  Widget _buildTopBarSystemFileButton(String displayName, String filePath) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: ElevatedButton(
+        // Don't use icon parameter, manually add Row with Icon and Text for better control
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.description, size: 16, color: Colors.white),
+            SizedBox(width: 4),
+            Text(
+              displayName.replaceAll('.yaml', ''),
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+          minimumSize: Size(0, 32),
+        ),
+        onPressed: () {
+          // Switch to tree view and select this file
+          setState(() {
+            _selectedViewIndex = 1; // Switch to tree view
+            _expandedFiles.add(filePath); // Mark as expanded
+          });
+        },
       ),
     );
   }

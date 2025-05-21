@@ -29,11 +29,13 @@ class DiffViewWidget extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
-              Text(
-                fileName,
-                style: TextStyle(fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  fileName,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
               IconButton(
                 icon: const Icon(Icons.copy),
                 tooltip: 'Copy modified content',

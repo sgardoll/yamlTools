@@ -9,12 +9,15 @@ class YamlTreeView extends StatefulWidget {
   final Map<String, String> yamlFiles;
   final Function(String, String)? onFileEdited; // Callback when file is edited
   final Map<String, String>? originalFiles; // Original files for comparison
+  final Set<String>?
+      expandedFiles; // Files that should be automatically expanded/selected
 
   const YamlTreeView({
     Key? key,
     required this.yamlFiles,
     this.onFileEdited,
     this.originalFiles,
+    this.expandedFiles,
   }) : super(key: key);
 
   @override
@@ -34,6 +37,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
   void initState() {
     super.initState();
     _buildTree();
+    _checkForAutoSelectFiles();
   }
 
   @override
@@ -47,6 +51,11 @@ class _YamlTreeViewState extends State<YamlTreeView> {
           widget.yamlFiles.containsKey(_selectedFilePath)) {
         _fileController.text = widget.yamlFiles[_selectedFilePath]!;
       }
+    }
+
+    // Check if expanded files changed
+    if (oldWidget.expandedFiles != widget.expandedFiles) {
+      _checkForAutoSelectFiles();
     }
   }
 
@@ -184,6 +193,19 @@ class _YamlTreeViewState extends State<YamlTreeView> {
         widget.originalFiles![filePath] != widget.yamlFiles[filePath];
   }
 
+  // Check if any files should be automatically selected
+  void _checkForAutoSelectFiles() {
+    if (widget.expandedFiles != null && widget.expandedFiles!.isNotEmpty) {
+      // Find the first expanded file to select
+      for (String filePath in widget.expandedFiles!) {
+        if (widget.yamlFiles.containsKey(filePath)) {
+          _selectFile(filePath);
+          break; // Only select the first one
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Check if we have important system files to show at the top
@@ -204,35 +226,35 @@ class _YamlTreeViewState extends State<YamlTreeView> {
           ),
         ),
 
-        // System files if present (compact view)
-        if (hasCompleteRaw || hasRawProject)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'System Files:',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[700],
-                  ),
-                ),
-                if (hasCompleteRaw)
-                  _buildCompactSystemFile(
-                      'complete_raw.yaml',
-                      widget.yamlFiles.keys
-                          .firstWhere((f) => f.contains('complete_raw.yaml'))),
-                if (hasRawProject)
-                  _buildCompactSystemFile(
-                      'raw_project.yaml',
-                      widget.yamlFiles.keys
-                          .firstWhere((f) => f.contains('raw_project.yaml'))),
-                Divider(),
-              ],
-            ),
-          ),
+        // System files section - hide completely since we now have buttons in the top bar
+        // if (hasCompleteRaw || hasRawProject)
+        //   Padding(
+        //     padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+        //     child: Column(
+        //       crossAxisAlignment: CrossAxisAlignment.start,
+        //       children: [
+        //         Text(
+        //           'System Files:',
+        //           style: TextStyle(
+        //             fontSize: 12,
+        //             fontWeight: FontWeight.bold,
+        //             color: Colors.grey[700],
+        //           ),
+        //         ),
+        //         if (hasCompleteRaw)
+        //           _buildCompactSystemFile(
+        //               'complete_raw.yaml',
+        //               widget.yamlFiles.keys
+        //                   .firstWhere((f) => f.contains('complete_raw.yaml'))),
+        //         if (hasRawProject)
+        //           _buildCompactSystemFile(
+        //               'raw_project.yaml',
+        //               widget.yamlFiles.keys
+        //                   .firstWhere((f) => f.contains('raw_project.yaml'))),
+        //         Divider(),
+        //       ],
+        //     ),
+        //   ),
 
         // Split view: Tree (top) and Editor (bottom)
         Expanded(
@@ -344,9 +366,15 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                 ),
                 // Edit/Save buttons
                 if (_isEditing) ...[
-                  ElevatedButton.icon(
-                    icon: Icon(Icons.save, size: 18),
-                    label: Text('Save'),
+                  ElevatedButton(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.save, size: 16, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('Save'),
+                      ],
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
@@ -356,9 +384,15 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                     onPressed: _applyChanges,
                   ),
                   SizedBox(width: 8),
-                  TextButton.icon(
-                    icon: Icon(Icons.cancel, size: 18),
-                    label: Text('Cancel'),
+                  TextButton(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.cancel, size: 16, color: Colors.red),
+                        SizedBox(width: 4),
+                        Text('Cancel'),
+                      ],
+                    ),
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.red,
                     ),
@@ -371,9 +405,21 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                     },
                   ),
                 ] else ...[
-                  ElevatedButton.icon(
-                    icon: Icon(Icons.edit, size: 18),
-                    label: Text('Edit'),
+                  ElevatedButton(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.edit, size: 16, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('Edit'),
+                      ],
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                      minimumSize: Size(0, 36),
+                    ),
                     onPressed: () {
                       setState(() {
                         _isEditing = true;
@@ -381,9 +427,21 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                     },
                   ),
                   SizedBox(width: 8),
-                  IconButton(
-                    icon: Icon(Icons.copy),
-                    tooltip: 'Copy content',
+                  ElevatedButton(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.copy, size: 16, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('Copy'),
+                      ],
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                      minimumSize: Size(0, 36),
+                    ),
                     onPressed: () {
                       // Implementation for copying content
                       Clipboard.setData(
