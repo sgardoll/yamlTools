@@ -913,15 +913,37 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.history,
-                                    size: 16, color: Colors.white),
+                                Icon(
+                                  Icons.history,
+                                  size: 16,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black38,
+                                      blurRadius: 2,
+                                      offset: Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
                                 SizedBox(width: 4),
-                                Text('Recent'),
+                                Text(
+                                  'Recent',
+                                  style: TextStyle(
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black38,
+                                        blurRadius: 2,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.blue,
                               foregroundColor: Colors.white,
+                              elevation: 3,
                               padding: EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 4),
                             ),
