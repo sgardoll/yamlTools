@@ -3,6 +3,7 @@ import 'package:yaml/yaml.dart';
 import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:flutter/services.dart';
+import 'diff_view_widget.dart';
 
 class YamlTreeView extends StatefulWidget {
   final Map<String, String> yamlFiles;
@@ -23,7 +24,7 @@ class YamlTreeView extends StatefulWidget {
 class _YamlTreeViewState extends State<YamlTreeView> {
   Map<String, bool> _expandedNodes = {};
   late TreeNode _rootNode;
-  
+
   // Track the selected file and editing state
   String? _selectedFilePath;
   bool _isEditing = false;
@@ -40,14 +41,15 @@ class _YamlTreeViewState extends State<YamlTreeView> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.yamlFiles != widget.yamlFiles) {
       _buildTree();
-      
+
       // Update selected file content if it still exists
-      if (_selectedFilePath != null && widget.yamlFiles.containsKey(_selectedFilePath)) {
+      if (_selectedFilePath != null &&
+          widget.yamlFiles.containsKey(_selectedFilePath)) {
         _fileController.text = widget.yamlFiles[_selectedFilePath]!;
       }
     }
   }
-  
+
   @override
   void dispose() {
     _fileController.dispose();
@@ -56,32 +58,38 @@ class _YamlTreeViewState extends State<YamlTreeView> {
 
   void _buildTree() {
     _rootNode = TreeNode(name: 'Root', type: NodeType.root);
-    
+
     // Group YAML files by their pattern
     final files = widget.yamlFiles.keys.toList()
       ..sort((a, b) => a.compareTo(b));
-    
+
     for (final filePath in files) {
+      // Skip system files, we'll handle them separately
+      if (filePath.contains('complete_raw.yaml') ||
+          filePath.contains('raw_project.yaml')) {
+        continue;
+      }
+
       if (!filePath.startsWith('archive_')) continue;
       if (!filePath.endsWith('.yaml')) continue;
-      
+
       // Extract path parts
       final fileName = filePath.replaceFirst('archive_', '');
       final pathParts = fileName.split('/');
-      
+
       // Skip files that don't match our expected patterns
       if (pathParts.length < 2) continue;
-      
+
       TreeNode currentNode = _rootNode;
-      
+
       // Build the path in the tree
       for (int i = 0; i < pathParts.length; i++) {
         final part = pathParts[i];
         final isLastPart = i == pathParts.length - 1;
-        
+
         // Detect node types based on path patterns
         NodeType nodeType = NodeType.folder;
-        
+
         if (part.startsWith('id-') && isLastPart) {
           nodeType = NodeType.leaf;
         } else if (part.startsWith('component')) {
@@ -99,7 +107,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
         } else if (part.startsWith('collections')) {
           nodeType = NodeType.collection;
         }
-        
+
         // Find or create child node
         TreeNode? childNode = currentNode.children.firstWhere(
           (node) => node.name == part,
@@ -113,40 +121,44 @@ class _YamlTreeViewState extends State<YamlTreeView> {
             return newNode;
           },
         );
-        
+
         currentNode = childNode;
       }
     }
-    
+
     // Recursive sort to ensure consistent order
     _sortTreeNodes(_rootNode);
   }
-  
+
   void _sortTreeNodes(TreeNode node) {
     // Sort this node's children
     node.children.sort((a, b) {
       // Put collections and components first
-      if (a.type == NodeType.collection && b.type != NodeType.collection) return -1;
-      if (a.type != NodeType.collection && b.type == NodeType.collection) return 1;
-      if (a.type == NodeType.component && b.type != NodeType.component) return -1;
-      if (a.type != NodeType.component && b.type == NodeType.component) return 1;
-      
+      if (a.type == NodeType.collection && b.type != NodeType.collection)
+        return -1;
+      if (a.type != NodeType.collection && b.type == NodeType.collection)
+        return 1;
+      if (a.type == NodeType.component && b.type != NodeType.component)
+        return -1;
+      if (a.type != NodeType.component && b.type == NodeType.component)
+        return 1;
+
       // Then sort alphabetically
       return a.name.compareTo(b.name);
     });
-    
+
     // Recursively sort children's children
     for (var child in node.children) {
       _sortTreeNodes(child);
     }
   }
-  
+
   // Select a file and prepare the editor
   void _selectFile(String? filePath) {
     setState(() {
       _selectedFilePath = filePath;
       _isEditing = false;
-      
+
       if (filePath != null && widget.yamlFiles.containsKey(filePath)) {
         _fileController.text = widget.yamlFiles[filePath]!;
       } else {
@@ -154,7 +166,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
       }
     });
   }
-  
+
   // Apply changes to the file
   void _applyChanges() {
     if (_selectedFilePath != null && widget.onFileEdited != null) {
@@ -164,16 +176,22 @@ class _YamlTreeViewState extends State<YamlTreeView> {
       });
     }
   }
-  
+
   // Check if a file is modified compared to original
   bool _isFileModified(String filePath) {
-    return widget.originalFiles != null && 
-           widget.originalFiles!.containsKey(filePath) &&
-           widget.originalFiles![filePath] != widget.yamlFiles[filePath];
+    return widget.originalFiles != null &&
+        widget.originalFiles!.containsKey(filePath) &&
+        widget.originalFiles![filePath] != widget.yamlFiles[filePath];
   }
 
   @override
   Widget build(BuildContext context) {
+    // Check if we have important system files to show at the top
+    bool hasCompleteRaw =
+        widget.yamlFiles.keys.any((f) => f.contains('complete_raw.yaml'));
+    bool hasRawProject =
+        widget.yamlFiles.keys.any((f) => f.contains('raw_project.yaml'));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -185,7 +203,37 @@ class _YamlTreeViewState extends State<YamlTreeView> {
             style: Theme.of(context).textTheme.titleLarge,
           ),
         ),
-        
+
+        // System files if present (compact view)
+        if (hasCompleteRaw || hasRawProject)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'System Files:',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                if (hasCompleteRaw)
+                  _buildCompactSystemFile(
+                      'complete_raw.yaml',
+                      widget.yamlFiles.keys
+                          .firstWhere((f) => f.contains('complete_raw.yaml'))),
+                if (hasRawProject)
+                  _buildCompactSystemFile(
+                      'raw_project.yaml',
+                      widget.yamlFiles.keys
+                          .firstWhere((f) => f.contains('raw_project.yaml'))),
+                Divider(),
+              ],
+            ),
+          ),
+
         // Split view: Tree (top) and Editor (bottom)
         Expanded(
           child: Row(
@@ -204,7 +252,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                   ),
                 ),
               ),
-              
+
               // Right side: Selected file preview/editor
               Expanded(
                 flex: 3,
@@ -216,20 +264,56 @@ class _YamlTreeViewState extends State<YamlTreeView> {
       ],
     );
   }
-  
+
+  // Helper method to build compact view for system files
+  Widget _buildCompactSystemFile(String displayName, String filePath) {
+    String content = widget.yamlFiles[filePath] ?? '';
+    bool isModified = _isFileModified(filePath);
+
+    return Card(
+      elevation: 0,
+      color: Colors.grey[100],
+      margin: EdgeInsets.symmetric(vertical: 2),
+      child: InkWell(
+        onTap: () => _selectFile(filePath),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.description, size: 14, color: Colors.blue[700]),
+              SizedBox(width: 4),
+              Text(
+                displayName,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.blue[700],
+                ),
+              ),
+              SizedBox(width: 4),
+              if (isModified)
+                Icon(Icons.edit_document, size: 12, color: Colors.amber[800]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // Build the file editor panel
   Widget _buildFileEditor() {
     if (_selectedFilePath == null) {
       return Card(
         margin: EdgeInsets.all(8.0),
         child: Center(
-          child: Text('Select a file from the tree to view and edit its content'),
+          child:
+              Text('Select a file from the tree to view and edit its content'),
         ),
       );
     }
-    
+
     bool isModified = _isFileModified(_selectedFilePath!);
-    
+
     return Card(
       margin: EdgeInsets.all(8.0),
       color: isModified ? Colors.amber[50] : null,
@@ -260,37 +344,50 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                 ),
                 // Edit/Save buttons
                 if (_isEditing) ...[
-                  IconButton(
-                    icon: Icon(Icons.save, color: Colors.green),
-                    tooltip: 'Save changes',
+                  ElevatedButton.icon(
+                    icon: Icon(Icons.save, size: 18),
+                    label: Text('Save'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                      minimumSize: Size(0, 36),
+                    ),
                     onPressed: _applyChanges,
                   ),
-                  IconButton(
-                    icon: Icon(Icons.cancel, color: Colors.red),
-                    tooltip: 'Cancel editing',
+                  SizedBox(width: 8),
+                  TextButton.icon(
+                    icon: Icon(Icons.cancel, size: 18),
+                    label: Text('Cancel'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.red,
+                    ),
                     onPressed: () {
                       setState(() {
-                        _fileController.text = widget.yamlFiles[_selectedFilePath]!;
+                        _fileController.text =
+                            widget.yamlFiles[_selectedFilePath]!;
                         _isEditing = false;
                       });
                     },
                   ),
                 ] else ...[
-                  IconButton(
-                    icon: Icon(Icons.edit),
-                    tooltip: 'Edit file',
+                  ElevatedButton.icon(
+                    icon: Icon(Icons.edit, size: 18),
+                    label: Text('Edit'),
                     onPressed: () {
                       setState(() {
                         _isEditing = true;
                       });
                     },
                   ),
+                  SizedBox(width: 8),
                   IconButton(
                     icon: Icon(Icons.copy),
                     tooltip: 'Copy content',
                     onPressed: () {
                       // Implementation for copying content
-                      Clipboard.setData(ClipboardData(text: _fileController.text))
+                      Clipboard.setData(
+                              ClipboardData(text: _fileController.text))
                           .then((_) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -305,40 +402,49 @@ class _YamlTreeViewState extends State<YamlTreeView> {
               ],
             ),
           ),
-          
+
           // File content
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(8.0),
               child: _isEditing
-                ? TextField(
-                    controller: _fileController,
-                    maxLines: null,
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(),
-                      filled: true,
-                      fillColor: Colors.white,
-                      hintText: 'Edit YAML content here...',
-                    ),
-                    style: TextStyle(fontFamily: 'monospace'),
-                  )
-                : GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _isEditing = true;
-                      });
-                    },
-                    child: Container(
-                      color: Colors.transparent,
-                      width: double.infinity,
-                      child: SingleChildScrollView(
-                        child: Text(
-                          _fileController.text,
-                          style: TextStyle(fontFamily: 'monospace'),
-                        ),
+                  ? TextField(
+                      controller: _fileController,
+                      maxLines: null,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.white,
+                        hintText: 'Edit YAML content here...',
                       ),
-                    ),
-                  ),
+                      style: TextStyle(fontFamily: 'monospace'),
+                    )
+                  : isModified && !_isEditing && widget.originalFiles != null
+                      ? DiffViewWidget(
+                          originalContent:
+                              widget.originalFiles![_selectedFilePath!] ?? '',
+                          modifiedContent: _fileController.text,
+                          fileName:
+                              _selectedFilePath!.replaceFirst('archive_', ''),
+                          onClose: null, // Keep it open in the tree view
+                        )
+                      : GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _isEditing = true;
+                            });
+                          },
+                          child: Container(
+                            color: Colors.transparent,
+                            width: double.infinity,
+                            child: SingleChildScrollView(
+                              child: Text(
+                                _fileController.text,
+                                style: TextStyle(fontFamily: 'monospace'),
+                              ),
+                            ),
+                          ),
+                        ),
             ),
           ),
         ],
@@ -351,8 +457,9 @@ class _YamlTreeViewState extends State<YamlTreeView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: nodes.map((node) {
         final isExpanded = _expandedNodes[node.path] ?? false;
-        final isSelected = node.filePath != null && node.filePath == _selectedFilePath;
-        
+        final isSelected =
+            node.filePath != null && node.filePath == _selectedFilePath;
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -361,7 +468,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                 if (node.filePath != null) {
                   _selectFile(node.filePath);
                 }
-                
+
                 if (node.children.isNotEmpty) {
                   setState(() {
                     _expandedNodes[node.path] = !isExpanded;
@@ -386,29 +493,32 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                       )
                     else
                       SizedBox(width: 20),
-                    
+
                     _getIconForNodeType(node.type, isSelected: isSelected),
-                    
+
                     SizedBox(width: 8),
-                    
+
                     Expanded(
                       child: Text(
                         _getDisplayName(node.name),
                         style: TextStyle(
-                          fontWeight: (node.type == NodeType.leaf || 
-                                      node.type == NodeType.component || 
-                                      node.type == NodeType.collection || 
-                                      isSelected)
-                                      ? FontWeight.bold : FontWeight.normal,
+                          fontWeight: (node.type == NodeType.leaf ||
+                                  node.type == NodeType.component ||
+                                  node.type == NodeType.collection ||
+                                  isSelected)
+                              ? FontWeight.bold
+                              : FontWeight.normal,
                           color: isSelected ? Colors.blue[800] : null,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    
+
                     // Show a modified indicator if applicable
-                    if (node.filePath != null && _isFileModified(node.filePath!))
-                      Icon(Icons.edit_document, size: 16, color: Colors.amber[800]),
+                    if (node.filePath != null &&
+                        _isFileModified(node.filePath!))
+                      Icon(Icons.edit_document,
+                          size: 16, color: Colors.amber[800]),
                   ],
                 ),
               ),
@@ -420,27 +530,28 @@ class _YamlTreeViewState extends State<YamlTreeView> {
       }).toList(),
     );
   }
-  
+
   String _getDisplayName(String name) {
     // Make the display name more readable
     String displayName = name;
-    
+
     // Extract name from id-* pattern
     if (name.startsWith('id-')) {
       displayName = name.substring(3);
-      
+
       // Make it more readable - split on underscores and camelCase
       displayName = displayName
-          .replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (match) => '${match[1]} ${match[2]}')
+          .replaceAllMapped(
+              RegExp(r'([a-z])([A-Z])'), (match) => '${match[1]} ${match[2]}')
           .replaceAll('_', ' ');
     }
-    
+
     return displayName;
   }
-  
+
   Widget _getIconForNodeType(NodeType type, {bool isSelected = false}) {
     Color? color;
-    
+
     switch (type) {
       case NodeType.root:
         color = isSelected ? Colors.blue[800] : Colors.blue[700];
@@ -475,13 +586,13 @@ class TreeNode {
   final NodeType type;
   final String? filePath;
   final List<TreeNode> children = [];
-  
+
   TreeNode({
     required this.name,
     required this.type,
     this.filePath,
   });
-  
+
   String get path => filePath ?? name;
 }
 

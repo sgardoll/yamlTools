@@ -4,11 +4,21 @@ A Flutter application that helps you visualize, explore, and edit YAML files fro
 
 ## Key Features
 
+### Git-like Diff View
+
+When you modify a YAML file, the application shows your changes in a side-by-side git-like diff view:
+
+- Green highlighting for added lines
+- Red highlighting for removed lines
+- Easy visualization of what changed before and after your edits
+- Clean, intuitive interface for understanding the impact of your modifications
+
 ### 1. Tree View Visualization
 
 The application now provides a hierarchical tree view for your FlutterFlow YAML structure! This intuitive visualization makes it easy to understand the relationship between pages, components, and widget trees.
 
 - **Color-coded nodes**: Different types of components are color-coded for easy identification:
+
   - Components (purple)
   - Containers (teal)
   - Layout widgets like Columns (indigo)

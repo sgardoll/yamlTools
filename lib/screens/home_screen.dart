@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../storage/preferences_manager.dart';
 import '../widgets/recent_projects_widget.dart';
 import '../widgets/yaml_tree_view.dart'; // Import our new tree view widget
+import '../widgets/diff_view_widget.dart'; // Import our diff view widget
 
 // Import web-specific functionality with fallback
 // ignore: avoid_web_libraries_in_flutter
@@ -55,6 +56,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Add a new state field to track which view is active
   int _selectedViewIndex = 0; // 0: export view, 1: tree view
+
+  // Add a new state field for loading indicator
+  bool _isLoading = false;
 
   // Helper to convert bytes to hex
   String _bytesToHexString(List<int> bytes) {
@@ -250,38 +254,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void _autoExpandImportantFiles() {
     _expandedFiles.clear();
 
-    // Always expand the combined file if it exists
-    if (_exportedFiles.containsKey('ALL_CONTENT_COMBINED.yaml')) {
-      _expandedFiles.add('ALL_CONTENT_COMBINED.yaml');
-      print(
-          'DEBUG: Auto-expanded ALL_CONTENT_COMBINED.yaml with ${_exportedFiles['ALL_CONTENT_COMBINED.yaml']?.length ?? 0} chars');
-    }
-
-    // And also expand complete_raw.yaml
+    // Only expand complete_raw.yaml automatically
     if (_exportedFiles.containsKey('complete_raw.yaml')) {
       _expandedFiles.add('complete_raw.yaml');
-    }
-
-    // Find the largest archive files to expand
-    List<MapEntry<String, String>> archiveEntries = _exportedFiles.entries
-        .where((entry) => entry.key.startsWith('archive_'))
-        .toList();
-
-    // Sort by content length (largest first)
-    archiveEntries.sort((a, b) => b.value.length.compareTo(a.value.length));
-
-    // Only expand the largest 1-2 archive files
-    List<String> largestFiles =
-        archiveEntries.take(2).map((entry) => entry.key).toList();
-
-    if (largestFiles.isNotEmpty) {
-      _expandedFiles.addAll(largestFiles);
-      print(
-          'DEBUG: Auto-expanded ${largestFiles.length} largest archive files:');
-      for (String fileName in largestFiles) {
-        print(
-            'DEBUG: - $fileName (${_exportedFiles[fileName]?.length ?? 0} chars)');
-      }
     }
   }
 
@@ -301,6 +276,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await _saveApiToken();
 
     setState(() {
+      _isLoading = true; // Set loading to true when fetch starts
       _generatedYamlMessage = 'Fetching YAML...';
       _rawFetchedYaml = null;
       _parsedYamlMap = null;
@@ -612,16 +588,23 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       setState(() {
+        _isLoading = false; // Set loading to false on error
         _generatedYamlMessage =
             'Failed to connect to the server. Please check your internet connection and try again.\nDetails: $e';
       });
       print('Exception caught during YAML fetch: $e');
+      return;
     }
 
     // Add a call to prepare files for export after successful fetch
     if (_parsedYamlMap != null) {
       _prepareFilesForExport();
     }
+
+    setState(() {
+      _isLoading = false; // Set loading to false when fetch completes
+      _expandedFiles.clear(); // Don't auto-expand any files
+    });
   }
 
   void _parseFetchedYaml() {
@@ -851,9 +834,26 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Expanded(
                             child: ElevatedButton(
-                              onPressed:
-                                  hasCredentials ? _fetchProjectYaml : null,
-                              child: Text('Fetch YAML'),
+                              onPressed: hasCredentials && !_isLoading
+                                  ? _fetchProjectYaml
+                                  : null,
+                              child: _isLoading
+                                  ? Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text('Fetching...'),
+                                      ],
+                                    )
+                                  : Text('Fetch YAML'),
                             ),
                           ),
                           if (hasYaml) ...[
@@ -949,14 +949,14 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } else {
       orderedKeys.sort((a, b) {
-        // Show archive files first
-        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
-        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
-        // Then show complete raw
+        // Show complete raw first
         if (a.contains('complete_raw.yaml')) return -1;
         if (b.contains('complete_raw.yaml')) return 1;
         if (a.contains('raw_project.yaml')) return -1;
         if (b.contains('raw_project.yaml')) return 1;
+        // Then show archive files
+        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
+        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
         return a.compareTo(b);
       });
     }
@@ -992,6 +992,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, index) {
                     String fileName = orderedKeys[index];
 
+                    // Special compact treatment for important files
+                    if (fileName.contains('complete_raw.yaml') ||
+                        fileName.contains('raw_project.yaml')) {
+                      return _buildCompactFileCard(
+                          fileName, filesToShow[fileName] ?? '');
+                    }
+
                     String fileContent = filesToShow[fileName] ?? '';
                     bool isExpanded = _expandedFiles.contains(fileName);
 
@@ -1004,9 +1011,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         "# This file was removed in the latest changes";
 
                     // Highlight the complete raw file
-                    bool isCompleteRaw =
-                        fileName.contains('complete_raw.yaml') ||
-                            fileName.contains('ALL_CONTENT_COMBINED');
+                    bool isCompleteRaw = fileName.contains('complete_raw.yaml');
 
                     // Highlight archive files
                     bool isArchiveFile = fileName.startsWith('archive_');
@@ -1098,7 +1103,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceEvenly,
                                         children: [
-                                          ElevatedButton(
+                                          ElevatedButton.icon(
+                                            icon: Icon(Icons.save),
+                                            label: Text('Save'),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.green,
+                                              foregroundColor: Colors.white,
+                                            ),
                                             onPressed: () {
                                               _applyFileChanges(
                                                   fileName,
@@ -1109,9 +1120,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     false;
                                               });
                                             },
-                                            child: Text('Save'),
                                           ),
-                                          TextButton(
+                                          TextButton.icon(
+                                            icon: Icon(Icons.cancel),
+                                            label: Text('Cancel'),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: Colors.red,
+                                            ),
                                             onPressed: () {
                                               setState(() {
                                                 _fileEditModes[fileName] =
@@ -1121,7 +1136,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     filesToShow[fileName] ?? '';
                                               });
                                             },
-                                            child: Text('Cancel'),
                                           ),
                                         ],
                                       ),
@@ -1181,14 +1195,14 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } else {
       orderedKeys.sort((a, b) {
-        // Show archive files first
-        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
-        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
-        // Then show complete raw
+        // Show complete raw first
         if (a.contains('complete_raw.yaml')) return -1;
         if (b.contains('complete_raw.yaml')) return 1;
         if (a.contains('raw_project.yaml')) return -1;
         if (b.contains('raw_project.yaml')) return 1;
+        // Then show archive files
+        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
+        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
         return a.compareTo(b);
       });
     }
@@ -1255,6 +1269,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, index) {
                     String fileName = orderedKeys[index];
 
+                    // Special compact treatment for important files
+                    if (fileName.contains('complete_raw.yaml') ||
+                        fileName.contains('raw_project.yaml')) {
+                      return _buildCompactFileCard(
+                          fileName, filesToShow[fileName] ?? '');
+                    }
+
                     String fileContent = filesToShow[fileName] ?? '';
                     bool isExpanded = _expandedFiles.contains(fileName);
 
@@ -1267,9 +1288,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         "# This file was removed in the latest changes";
 
                     // Highlight the complete raw file
-                    bool isCompleteRaw =
-                        fileName.contains('complete_raw.yaml') ||
-                            fileName.contains('ALL_CONTENT_COMBINED');
+                    bool isCompleteRaw = fileName.contains('complete_raw.yaml');
 
                     // Highlight archive files
                     bool isArchiveFile = fileName.startsWith('archive_');
@@ -1390,56 +1409,61 @@ class _HomeScreenState extends State<HomeScreen> {
                                     children: [
                                       // Allow editing for all files when expanded
                                       if (isExpanded)
-                                        IconButton(
-                                          icon: isEditing
-                                              ? Container(
-                                                  padding: EdgeInsets.all(4),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.green[100],
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            4),
-                                                  ),
-                                                  child: Icon(
-                                                    Icons.save,
-                                                    size: 20,
-                                                    color: Colors.green[800],
-                                                  ),
-                                                )
-                                              : Icon(
-                                                  Icons.edit,
-                                                  size: 18,
-                                                  color: null,
+                                        isEditing
+                                            ? ElevatedButton.icon(
+                                                icon:
+                                                    Icon(Icons.save, size: 18),
+                                                label: Text('Save',
+                                                    style: TextStyle(
+                                                        fontSize: 12)),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.green,
+                                                  foregroundColor: Colors.white,
+                                                  padding: EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 0),
+                                                  minimumSize: Size(0, 32),
                                                 ),
-                                          tooltip: isEditing
-                                              ? 'Save changes'
-                                              : 'Edit file',
-                                          onPressed: () {
-                                            if (isEditing) {
-                                              // Get updated content
-                                              String newContent =
-                                                  _fileControllers[fileName]!
-                                                      .text;
+                                                onPressed: () {
+                                                  // Get updated content
+                                                  String newContent =
+                                                      _fileControllers[
+                                                              fileName]!
+                                                          .text;
 
-                                              // Apply changes using our helper method
-                                              _applyFileChanges(
-                                                  fileName, newContent);
+                                                  // Apply changes using our helper method
+                                                  _applyFileChanges(
+                                                      fileName, newContent);
 
-                                              // Exit edit mode
-                                              setState(() {
-                                                _fileEditModes[fileName] =
-                                                    false;
-                                              });
-                                            } else {
-                                              // Enter edit mode
-                                              setState(() {
-                                                _fileEditModes[fileName] = true;
-                                                _fileControllers[fileName]!
-                                                    .text = fileContent;
-                                              });
-                                            }
-                                          },
-                                        ),
+                                                  // Exit edit mode
+                                                  setState(() {
+                                                    _fileEditModes[fileName] =
+                                                        false;
+                                                  });
+                                                },
+                                              )
+                                            : ElevatedButton.icon(
+                                                icon:
+                                                    Icon(Icons.edit, size: 18),
+                                                label: Text('Edit',
+                                                    style: TextStyle(
+                                                        fontSize: 12)),
+                                                style: ElevatedButton.styleFrom(
+                                                  padding: EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 0),
+                                                  minimumSize: Size(0, 32),
+                                                ),
+                                                onPressed: () {
+                                                  // Enter edit mode
+                                                  setState(() {
+                                                    _fileEditModes[fileName] =
+                                                        true;
+                                                    _fileControllers[fileName]!
+                                                        .text = fileContent;
+                                                  });
+                                                },
+                                              ),
                                       // Copy button
                                       IconButton(
                                         icon: Icon(Icons.copy, size: 18),
@@ -1486,28 +1510,40 @@ class _HomeScreenState extends State<HomeScreen> {
                                         fontSize: 14,
                                       ),
                                     )
-                                  : GestureDetector(
-                                      onTap: () {
-                                        // Enter edit mode when text is clicked
-                                        setState(() {
-                                          _fileEditModes[fileName] = true;
-                                          _fileControllers[fileName]!.text =
-                                              fileContent;
-                                        });
-                                      },
-                                      child: Container(
-                                        color: Colors
-                                            .transparent, // Makes the entire area tappable
-                                        width: double.infinity,
-                                        child: SingleChildScrollView(
-                                          child: Text(
-                                            fileContent,
-                                            style: TextStyle(
-                                                fontFamily: 'monospace'),
+                                  : wasModified
+                                      ? DiffViewWidget(
+                                          originalContent:
+                                              _originalFiles[fileName] ?? '',
+                                          modifiedContent: fileContent,
+                                          fileName: fileName,
+                                          onClose: () {
+                                            setState(() {
+                                              _expandedFiles.remove(fileName);
+                                            });
+                                          },
+                                        )
+                                      : GestureDetector(
+                                          onTap: () {
+                                            // Enter edit mode when text is clicked
+                                            setState(() {
+                                              _fileEditModes[fileName] = true;
+                                              _fileControllers[fileName]!.text =
+                                                  fileContent;
+                                            });
+                                          },
+                                          child: Container(
+                                            color: Colors
+                                                .transparent, // Makes the entire area tappable
+                                            width: double.infinity,
+                                            child: SingleChildScrollView(
+                                              child: Text(
+                                                fileContent,
+                                                style: TextStyle(
+                                                    fontFamily: 'monospace'),
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    ),
                             ),
                           ],
                         ],
@@ -1560,13 +1596,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _exportedFiles['complete_raw.yaml']!;
       }
 
-      if (_exportedFiles.containsKey('ALL_CONTENT_COMBINED.yaml') &&
-          _exportedFiles['ALL_CONTENT_COMBINED.yaml']!.isNotEmpty) {
-        print(
-            'DEBUG: No archive files found, preserving existing ALL_CONTENT_COMBINED.yaml content');
-        archiveFiles['preserved_combined'] =
-            _exportedFiles['ALL_CONTENT_COMBINED.yaml']!;
-      }
+      // We no longer need to preserve ALL_CONTENT_COMBINED.yaml
     }
 
     // Create a combined file with all content
@@ -1608,15 +1638,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _exportedFiles[key] = value;
     });
 
-    // Add the combined all-in-one file if we have content to combine
+    // Add the content to complete_raw.yaml
     String combinedString = combinedContent.toString();
     if (combinedString.isNotEmpty) {
-      _exportedFiles['ALL_CONTENT_COMBINED.yaml'] = combinedString;
-      print(
-          'DEBUG: Created ALL_CONTENT_COMBINED.yaml with ${combinedString.length} chars');
-
-      // Also make this the "complete_raw.yaml" file
+      // Only create complete_raw.yaml, no need for ALL_CONTENT_COMBINED.yaml
       _exportedFiles['complete_raw.yaml'] = combinedString;
+      print(
+          'DEBUG: Created complete_raw.yaml with ${combinedString.length} chars');
     }
 
     // And make the largest individual file the raw_project.yaml
@@ -1769,5 +1797,74 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     });
+  }
+
+  // New method to build a compact file card for important system files
+  Widget _buildCompactFileCard(String fileName, String content) {
+    return Card(
+      margin: EdgeInsets.only(bottom: 8),
+      color: Colors.grey[100],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Icon(Icons.description, size: 16, color: Colors.blue[800]),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                fileName,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: Colors.blue[800],
+                ),
+              ),
+            ),
+            Text(
+              '${content.length} chars',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+            SizedBox(width: 8),
+            IconButton(
+              icon: Icon(Icons.copy, size: 16),
+              tooltip: 'Copy content',
+              onPressed: () {
+                _fallbackClipboardCopy(context, fileName, content);
+              },
+            ),
+            // Make View button more prominent
+            ElevatedButton.icon(
+              icon: Icon(Icons.visibility, size: 16),
+              label: Text('View', style: TextStyle(fontSize: 12)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                minimumSize: Size(0, 32),
+              ),
+              onPressed: () {
+                setState(() {
+                  if (_expandedFiles.contains(fileName)) {
+                    _expandedFiles.remove(fileName);
+                  } else {
+                    _expandedFiles.add(fileName);
+                  }
+                });
+
+                // Find the correct list view item and scroll to it
+                Future.delayed(Duration(milliseconds: 100), () {
+                  // This is a basic approach - you may need a more sophisticated solution
+                  // depending on your specific implementation
+                  Scrollable.ensureVisible(
+                    context,
+                    duration: Duration(milliseconds: 300),
+                  );
+                });
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
