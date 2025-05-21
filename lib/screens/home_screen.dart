@@ -783,14 +783,38 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.edit, size: 16, color: Colors.white),
+                                Icon(
+                                  Icons.edit,
+                                  size: 16,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black38,
+                                      blurRadius: 2,
+                                      offset: Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
                                 SizedBox(width: 4),
-                                Text('Edit', style: TextStyle(fontSize: 12)),
+                                Text(
+                                  'Edit',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black38,
+                                        blurRadius: 2,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.blue,
                               foregroundColor: Colors.white,
+                              elevation: 3,
                               padding: EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 0),
                               minimumSize: Size(0, 32),
@@ -803,8 +827,18 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           SizedBox(width: 8),
                           IconButton(
-                            icon: Icon(Icons.history,
-                                size: 20, color: Colors.orange),
+                            icon: Icon(
+                              Icons.history,
+                              size: 20,
+                              color: Colors.orange,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black38,
+                                  blurRadius: 2,
+                                  offset: Offset(0, 1),
+                                ),
+                              ],
+                            ),
                             tooltip: 'Recent projects',
                             onPressed: () {
                               setState(() {
@@ -816,15 +850,38 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.refresh,
-                                    size: 16, color: Colors.white),
+                                Icon(
+                                  Icons.refresh,
+                                  size: 16,
+                                  color: Colors.white,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black38,
+                                      blurRadius: 2,
+                                      offset: Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
                                 SizedBox(width: 4),
-                                Text('Reload', style: TextStyle(fontSize: 12)),
+                                Text(
+                                  'Reload',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black38,
+                                        blurRadius: 2,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
                               foregroundColor: Colors.white,
+                              elevation: 3,
                               padding: EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 0),
                               minimumSize: Size(0, 32),
@@ -1527,18 +1584,40 @@ class _HomeScreenState extends State<HomeScreen> {
                                                   mainAxisSize:
                                                       MainAxisSize.min,
                                                   children: [
-                                                    Icon(Icons.edit,
-                                                        size: 16,
-                                                        color: Colors.white),
+                                                    Icon(
+                                                      Icons.edit,
+                                                      size: 16,
+                                                      color: Colors.white,
+                                                      shadows: [
+                                                        Shadow(
+                                                          color: Colors.black38,
+                                                          blurRadius: 2,
+                                                          offset: Offset(0, 1),
+                                                        ),
+                                                      ],
+                                                    ),
                                                     SizedBox(width: 4),
-                                                    Text('Edit',
-                                                        style: TextStyle(
-                                                            fontSize: 12)),
+                                                    Text(
+                                                      'Edit',
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        shadows: [
+                                                          Shadow(
+                                                            color:
+                                                                Colors.black38,
+                                                            blurRadius: 2,
+                                                            offset:
+                                                                Offset(0, 1),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
                                                   ],
                                                 ),
                                                 style: ElevatedButton.styleFrom(
                                                   backgroundColor: Colors.blue,
                                                   foregroundColor: Colors.white,
+                                                  elevation: 3,
                                                   padding: EdgeInsets.symmetric(
                                                       horizontal: 8,
                                                       vertical: 0),
@@ -1994,17 +2073,41 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.description, size: 16, color: Colors.white),
+            // Improve icon visibility with explicit coloring and size
+            Icon(
+              Icons.description,
+              size: 16,
+              color: Colors.white,
+              // Add shadow to improve contrast against any background
+              shadows: [
+                Shadow(
+                  color: Colors.black38,
+                  blurRadius: 2,
+                  offset: Offset(0, 1),
+                ),
+              ],
+            ),
             SizedBox(width: 4),
             Text(
               displayName.replaceAll('.yaml', ''),
-              style: TextStyle(fontSize: 12),
+              style: TextStyle(
+                fontSize: 12,
+                shadows: [
+                  Shadow(
+                    color: Colors.black38,
+                    blurRadius: 2,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.blue,
           foregroundColor: Colors.white,
+          // Add elevation for better visibility
+          elevation: 3,
           padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
           minimumSize: Size(0, 32),
         ),
