@@ -303,15 +303,24 @@ class _HomeScreenState extends State<HomeScreen> {
     List<int>? decodedZipBytes;
 
     try {
-      final Uri uri = Uri.parse(
-          'https://api.flutterflow.io/v2/projectYamls?projectId=$projectId');
+      final apiUrl =
+          'https://api.flutterflow.io/v2/projectYamls?projectId=$projectId';
+      print('Fetching YAML from: $apiUrl');
+
       final response = await http.get(
-        uri,
+        Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $apiToken',
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          // Add cache control to prevent caching issues
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
         },
       );
+
+      print('YAML fetch response status: ${response.statusCode}');
+
       final String? contentLengthHeader = response.headers['content-length'];
       print(
           'DEBUG_LOG: API Response Header Content-Length: $contentLengthHeader');
