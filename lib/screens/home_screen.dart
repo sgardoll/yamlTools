@@ -1678,45 +1678,61 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Handler for AI Assist button
   void _handleAIAssist() {
-    // This would normally trigger an AI assistant for YAML editing
-    // For now, we'll just show a simple dialog
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('AI Assist'),
-        content: const Text(
-            'AI assistance for YAML editing will be available in a future update.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
+    setState(() {
+      _showAIAssist = !_showAIAssist;
+    });
   }
 
   // Method to handle AI-generated YAML updates
-  void _updateYamlFromAI(String yamlContent) {
+  void _updateYamlFromAI(String yamlContent, {String? existingFile}) {
     if (yamlContent.isEmpty) return;
 
-    // Create a new file with AI-generated content
-    final String fileName =
-        'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
+    if (existingFile != null && _exportedFiles.containsKey(existingFile)) {
+      // Update existing file
+      setState(() {
+        // Back up the original if this is the first modification
+        if (!_originalFiles.containsKey(existingFile)) {
+          _originalFiles[existingFile] = _exportedFiles[existingFile]!;
+        }
 
-    setState(() {
-      _exportedFiles[fileName] = yamlContent;
-      _changedFiles[fileName] = yamlContent;
-      _hasModifications = true;
-      _operationMessage = 'AI-generated YAML file "$fileName" created.';
-      _generatedYamlMessage =
-          '$_operationMessage\n\nThe file has been added to your project.';
+        // Update the file content
+        _exportedFiles[existingFile] = yamlContent;
+        _changedFiles[existingFile] = yamlContent;
+        _hasModifications = true;
+        _operationMessage =
+            'File "$existingFile" updated with AI-generated changes.';
+        _generatedYamlMessage = _operationMessage;
 
-      // Auto-expand the new file
-      _expandedFiles.add(fileName);
+        // Make sure the file is expanded
+        _expandedFiles.add(existingFile);
 
-      // Set the selected file
-      _selectedFilePath = fileName;
-    });
+        // Set the selected file
+        _selectedFilePath = existingFile;
+
+        // Update the controller if it exists
+        if (_fileControllers.containsKey(existingFile)) {
+          _fileControllers[existingFile]!.text = yamlContent;
+        }
+      });
+    } else {
+      // Create a new file with AI-generated content
+      final String fileName =
+          'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
+
+      setState(() {
+        _exportedFiles[fileName] = yamlContent;
+        _changedFiles[fileName] = yamlContent;
+        _hasModifications = true;
+        _operationMessage = 'AI-generated YAML file "$fileName" created.';
+        _generatedYamlMessage =
+            '$_operationMessage\n\nThe file has been added to your project.';
+
+        // Auto-expand the new file
+        _expandedFiles.add(fileName);
+
+        // Set the selected file
+        _selectedFilePath = fileName;
+      });
+    }
   }
 }

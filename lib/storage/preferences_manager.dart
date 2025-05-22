@@ -6,6 +6,7 @@ class PreferencesManager {
   static const String _apiKeyKey = 'api_key';
   static const String _openAIApiKeyKey = 'openai_api_key';
   static const String _recentProjectsKey = 'recent_projects';
+  static const String _yamlSourceUrlKey = 'yaml_source_url';
   static const int _maxRecentProjects = 10;
 
   /// Saves the API key to persistent storage
@@ -104,5 +105,17 @@ class PreferencesManager {
   static Future<bool> clearRecentProjects() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.remove(_recentProjectsKey);
+  }
+
+  /// Saves the YAML source URL to persistent storage
+  static Future<bool> saveYamlSourceUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.setString(_yamlSourceUrlKey, url);
+  }
+
+  /// Retrieves the stored YAML source URL
+  static Future<String?> getYamlSourceUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_yamlSourceUrlKey);
   }
 }

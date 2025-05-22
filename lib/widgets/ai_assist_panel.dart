@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../storage/preferences_manager.dart';
 import 'dart:convert';
+import 'package:archive/archive.dart';
+import 'package:yaml/yaml.dart';
 
 class OpenAIClient {
   final String apiKey;
@@ -33,9 +35,6 @@ class OpenAIClient {
       body['max_tokens'] = maxTokens;
     }
 
-    // Add file_id for file retrieval
-    body['file_ids'] = ["file-FxxrDYzFyN3geZb9rt5Ay4"];
-
     final response = await http.post(
       url,
       headers: {
@@ -55,7 +54,7 @@ class OpenAIClient {
 }
 
 class AIAssistPanel extends StatefulWidget {
-  final Function(String) onUpdateYaml;
+  final Function(String, {String? existingFile}) onUpdateYaml;
   final Map<String, String> currentFiles;
   final Function() onClose;
 
@@ -74,16 +73,55 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
   final TextEditingController _apiKeyController = TextEditingController();
   final TextEditingController _promptController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
+  final TextEditingController _yamlSourceController = TextEditingController();
 
   bool _isLoading = false;
   bool _isApiKeyValid = false;
   OpenAIClient? _openAIClient;
   List<Map<String, String>> _chatHistory = [];
 
+  // Add a list of YAML examples
+  List<String> _yamlExamples = [];
+  // Add a flag to track if external examples are being loaded
+  bool _isLoadingExamples = false;
+  // Track the external source URL
+  String? _externalSourceUrl;
+
   @override
   void initState() {
     super.initState();
     _loadApiKey();
+    _loadSavedYamlSource();
+    // Load example YAML files
+    _loadYamlExamples();
+  }
+
+  // Method to load YAML examples
+  void _loadYamlExamples() {
+    // Get examples from the current files being displayed
+    setState(() {
+      _yamlExamples = [];
+      widget.currentFiles.forEach((filename, content) {
+        // Only use small to medium sized YAML files as examples
+        if (content.length > 100 &&
+            content.length < 3000 &&
+            filename.endsWith('.yaml')) {
+          _yamlExamples.add("Example: $filename\n$content");
+
+          // Limit to 5 examples to avoid token limits
+          if (_yamlExamples.length >= 5) return;
+        }
+      });
+    });
+  }
+
+  @override
+  void didUpdateWidget(AIAssistPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Reload examples when the files change
+    if (oldWidget.currentFiles != widget.currentFiles) {
+      _loadYamlExamples();
+    }
   }
 
   @override
@@ -91,6 +129,7 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
     _apiKeyController.dispose();
     _promptController.dispose();
     _chatScrollController.dispose();
+    _yamlSourceController.dispose();
     super.dispose();
   }
 
@@ -145,7 +184,6 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
       final systemMessage =
           "You're an AI assistant that helps modify FlutterFlow YAML files. "
           "Your primary purpose is to make changes to YAML files that will be uploaded back to FlutterFlow to modify their live project. "
-          "You have access to example FlutterFlow YAML files in vector storage with file ID file-FxxrDYzFyN3geZb9rt5Ay4. "
           "IMPORTANT RULES WHEN MODIFYING YAML:\n"
           "1. DO NOT change any existing keys in the YAML structure\n"
           "2. You CAN create new keys, but ensure they are unique\n"
@@ -158,28 +196,59 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
         {'role': 'system', 'content': systemMessage},
       ];
 
-      // Add relevant file content as context
-      String filesContext = "";
+      // Add YAML examples to the context if available, with token limit considerations
+      if (_yamlExamples.isNotEmpty) {
+        // Limit to 3 examples max when sending to API to avoid context overflow
+        final limitedExamples = _yamlExamples.length > 3
+            ? _yamlExamples.sublist(0, 3)
+            : _yamlExamples;
+        final examplesContent =
+            "Here are some example FlutterFlow YAML files to help understand the structure:\n\n" +
+                limitedExamples.join("\n\n---\n\n");
+        messages.add({'role': 'system', 'content': examplesContent});
+      }
+
+      // Add project context with token conservation
+      Map<String, String> limitedCurrentFiles = {};
+      int totalContextSize = 0;
+
+      // First pass: Include only small files
       widget.currentFiles.forEach((filename, content) {
-        // Only include small files to avoid token limits
-        if (content.length < 5000) {
-          filesContext += "File: $filename\n$content\n\n";
-        } else {
-          filesContext +=
-              "File: $filename (too large to include full content)\n";
+        if (content.length < 1000 && totalContextSize < 40000) {
+          limitedCurrentFiles[filename] = content;
+          totalContextSize += content.length;
         }
       });
 
-      if (filesContext.isNotEmpty) {
+      // Only if we have token budget remaining, add medium-sized files
+      if (totalContextSize < 40000) {
+        widget.currentFiles.forEach((filename, content) {
+          if (!limitedCurrentFiles.containsKey(filename) &&
+              content.length >= 1000 &&
+              content.length < 3000 &&
+              totalContextSize + content.length < 40000) {
+            limitedCurrentFiles[filename] = content;
+            totalContextSize += content.length;
+          }
+        });
+      }
+
+      // Build the context message with limited files
+      if (limitedCurrentFiles.isNotEmpty) {
+        String filesContext = "";
+        limitedCurrentFiles.forEach((filename, content) {
+          filesContext += "File: $filename\n$content\n\n";
+        });
+
         messages.add({
           'role': 'system',
-          'content': "Current project files:\n$filesContext"
+          'content': "Current project files (limited selection):\n$filesContext"
         });
       }
 
       // Add chat history (limited to last few exchanges to avoid token limits)
-      final recentHistory = _chatHistory.length > 6
-          ? _chatHistory.sublist(_chatHistory.length - 6)
+      final recentHistory = _chatHistory.length > 4
+          ? _chatHistory.sublist(_chatHistory.length - 4)
           : _chatHistory;
 
       for (final message in recentHistory) {
@@ -188,7 +257,7 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
 
       // Make OpenAI API call
       final response = await _openAIClient!.chat(
-        model: "gpt-4o", // Using GPT-4o as specified (similar to GPT-4.1)
+        model: "gpt-4o", // Using GPT-4o as specified
         messages: messages,
         temperature: 0.7,
         maxTokens: 2000,
@@ -228,19 +297,80 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
       if (match.groupCount >= 1) {
         final yamlContent = match.group(1);
         if (yamlContent != null && yamlContent.trim().isNotEmpty) {
-          // Ask the user if they want to apply this YAML
-          _showYamlUpdateDialog(yamlContent);
+          // Try to identify which file this should modify
+          _identifyAndShowUpdateDialog(yamlContent);
           break; // Only show dialog for the first YAML block found
         }
       }
     }
   }
 
-  void _showYamlUpdateDialog(String yamlContent) {
+  // New method to identify target file for YAML updates
+  void _identifyAndShowUpdateDialog(String yamlContent) {
+    try {
+      // Try to parse the YAML to detect its structure
+      final parsedYaml = loadYaml(yamlContent);
+
+      // List of potential target files based on content similarity
+      List<String> potentialTargets = [];
+      String? bestMatch;
+      double bestMatchScore = 0;
+
+      // Check each file to find a potential match
+      widget.currentFiles.forEach((fileName, content) {
+        if (fileName.endsWith('.yaml')) {
+          try {
+            // Simple similarity check based on key presence
+            final existingYaml = loadYaml(content);
+            if (existingYaml is Map && parsedYaml is Map) {
+              // Count matching top-level keys to determine similarity
+              int matchingKeys = 0;
+              int totalKeys = 0;
+
+              parsedYaml.keys.forEach((key) {
+                totalKeys++;
+                if (existingYaml.containsKey(key)) {
+                  matchingKeys++;
+                }
+              });
+
+              // Calculate a similarity score (0.0 - 1.0)
+              double similarityScore =
+                  totalKeys > 0 ? matchingKeys / totalKeys : 0;
+
+              // Consider files with at least 30% similarity as potential targets
+              if (similarityScore >= 0.3) {
+                potentialTargets.add(fileName);
+
+                // Track the best match
+                if (similarityScore > bestMatchScore) {
+                  bestMatchScore = similarityScore;
+                  bestMatch = fileName;
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore parsing errors for existing files
+            print('Error parsing existing file $fileName: $e');
+          }
+        }
+      });
+
+      // Show dialog with file selection options
+      _showYamlUpdateDialog(yamlContent, potentialTargets, bestMatch);
+    } catch (e) {
+      // If parsing fails, just show the standard dialog without file suggestions
+      _showYamlUpdateDialog(yamlContent, [], null);
+      print('Error parsing YAML for file identification: $e');
+    }
+  }
+
+  void _showYamlUpdateDialog(
+      String yamlContent, List<String> potentialTargets, String? bestMatch) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Apply FlutterFlow YAML Changes?'),
+        title: Text('Apply FlutterFlow YAML Changes'),
         content: Container(
           width: double.maxFinite,
           child: SingleChildScrollView(
@@ -266,8 +396,47 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                   ),
                 ),
                 SizedBox(height: 16),
+
+                // Add file selection for updating existing files
+                if (potentialTargets.isNotEmpty) ...[
+                  Text(
+                    'Select the file to update:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  ...potentialTargets
+                      .map(
+                        (fileName) => RadioListTile<String>(
+                          title: Text(fileName,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: fileName == bestMatch
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              )),
+                          value: fileName,
+                          groupValue: bestMatch,
+                          onChanged: (value) {
+                            Navigator.pop(context);
+                            if (value != null) {
+                              // Show confirmation dialog for the selected file
+                              _confirmFileUpdate(yamlContent, value);
+                            }
+                          },
+                          dense: true,
+                          selected: fileName == bestMatch,
+                        ),
+                      )
+                      .toList(),
+                  Divider(),
+                ],
+
                 Text(
-                  'Note: These changes will be added to your project as a new file that you can then upload to FlutterFlow.',
+                  potentialTargets.isEmpty
+                      ? 'These changes will be added as a new file in your project.'
+                      : 'Or create a new file with these changes:',
                   style: TextStyle(
                     fontStyle: FontStyle.italic,
                     color: Colors.orange[800],
@@ -284,10 +453,107 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
           ),
           ElevatedButton(
             onPressed: () {
+              // Create a new file if no existing file is selected
               widget.onUpdateYaml(yamlContent);
               Navigator.pop(context);
             },
-            child: Text('Apply Changes'),
+            child: Text('Create New File'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // New method to confirm updating an existing file
+  void _confirmFileUpdate(String yamlContent, String fileName) {
+    final existingContent = widget.currentFiles[fileName] ?? '';
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Confirm Update to $fileName'),
+        content: Container(
+          width: double.maxFinite,
+          height: 400,
+          child: Column(
+            children: [
+              Text(
+                  'This will replace the existing file with the AI-generated content.'),
+              SizedBox(height: 16),
+              Expanded(
+                child: DefaultTabController(
+                  length: 2,
+                  child: Column(
+                    children: [
+                      TabBar(
+                        tabs: [
+                          Tab(text: 'Current'),
+                          Tab(text: 'New Version'),
+                        ],
+                        labelColor: Colors.blue,
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            // Current file content
+                            SingleChildScrollView(
+                              child: Container(
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.black12,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: SelectableText(
+                                  existingContent,
+                                  style: TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // New content
+                            SingleChildScrollView(
+                              child: Container(
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.black12,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: SelectableText(
+                                  yamlContent,
+                                  style: TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // Update the existing file
+              widget.onUpdateYaml(yamlContent, existingFile: fileName);
+              Navigator.pop(context);
+            },
+            child: Text('Update File'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+            ),
           ),
         ],
       ),
@@ -304,6 +570,143 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
         );
       }
     });
+  }
+
+  // Method to fetch YAML examples from a URL
+  Future<void> _fetchExternalYamlExamples(String url) async {
+    if (url.isEmpty) return;
+
+    setState(() {
+      _isLoadingExamples = true;
+      _chatHistory.add({
+        'role': 'assistant',
+        'content': 'Fetching and processing YAML examples from $url...'
+      });
+    });
+
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        // Store the URL for future reference
+        _externalSourceUrl = url;
+        await PreferencesManager.saveYamlSourceUrl(url);
+
+        // Process the ZIP file
+        try {
+          // Decode the bytes as a zip file
+          final bytes = response.bodyBytes;
+          final archive = ZipDecoder().decodeBytes(bytes);
+
+          // This will store our examples
+          _yamlExamples = [];
+          int examplesCount = 0;
+          int projectsProcessed = 0;
+          int totalTokens = 0; // Track estimated token count
+
+          // Rough token estimation: 1 token ~= 4 characters for English text
+          const int MAX_TOKENS = 20000; // Set a conservative max tokens limit
+          const int MAX_EXAMPLES = 5; // Reduce max examples from 10 to 5
+          const int MAX_FILE_SIZE =
+              2000; // Reduce max file size for safer limits
+
+          // Process each file in the main archive
+          for (final file in archive) {
+            if (!file.isFile || !file.name.endsWith('.zip')) continue;
+
+            try {
+              // Each file is itself a zip file containing project YAML
+              final projectBytes = file.content as List<int>;
+              final projectArchive = ZipDecoder().decodeBytes(projectBytes);
+              projectsProcessed++;
+
+              // Extract YAML examples from this project
+              for (final projectFile in projectArchive) {
+                if (projectFile.isFile &&
+                    projectFile.name.endsWith('.yaml') &&
+                    projectFile.size > 100 &&
+                    projectFile.size < MAX_FILE_SIZE) {
+                  // Stricter file size limit
+
+                  // Extract the file content
+                  final fileData = projectFile.content as List<int>;
+                  final fileContent =
+                      utf8.decode(fileData, allowMalformed: true);
+
+                  // Calculate estimated tokens for this content
+                  int estimatedTokens = (fileContent.length / 4).ceil() +
+                      50; // Add buffer for metadata
+
+                  // Check if adding this would exceed our token budget
+                  if (totalTokens + estimatedTokens > MAX_TOKENS) {
+                    print('Token limit reached. Stopping example collection.');
+                    break;
+                  }
+
+                  // Truncate very long content if needed (rare case)
+                  String processedContent = fileContent;
+                  if (fileContent.length > MAX_FILE_SIZE * 2) {
+                    processedContent = fileContent.substring(0, MAX_FILE_SIZE) +
+                        "\n\n... (content truncated for brevity) ...\n\n" +
+                        fileContent.substring(fileContent.length - 500);
+                  }
+
+                  // Add as an example
+                  _yamlExamples
+                      .add("Example: ${projectFile.name}\n$processedContent");
+                  examplesCount++;
+                  totalTokens += estimatedTokens;
+
+                  // Log token usage
+                  print(
+                      'Added example ${projectFile.name}, tokens: $estimatedTokens, total: $totalTokens');
+
+                  // Limit to max examples
+                  if (examplesCount >= MAX_EXAMPLES) break;
+                }
+              }
+
+              // If we've collected enough examples, stop processing more projects
+              if (examplesCount >= MAX_EXAMPLES || totalTokens > MAX_TOKENS)
+                break;
+            } catch (e) {
+              print('Error processing project ZIP ${file.name}: $e');
+            }
+          }
+
+          setState(() {
+            _isLoadingExamples = false;
+            _chatHistory.add({
+              'role': 'assistant',
+              'content':
+                  'Successfully loaded $examplesCount YAML examples (est. $totalTokens tokens) from $projectsProcessed projects.'
+            });
+          });
+        } catch (e) {
+          throw Exception('Failed to process ZIP file: ${e.toString()}');
+        }
+      } else {
+        throw Exception('Failed to load YAML examples: ${response.statusCode}');
+      }
+    } catch (e) {
+      setState(() {
+        _isLoadingExamples = false;
+        _chatHistory.add({
+          'role': 'assistant',
+          'content': 'Error loading external YAML examples: ${e.toString()}'
+        });
+      });
+      _scrollToBottom();
+    }
+  }
+
+  // Load saved YAML source URL
+  Future<void> _loadSavedYamlSource() async {
+    final savedUrl = await PreferencesManager.getYamlSourceUrl();
+    if (savedUrl != null && savedUrl.isNotEmpty) {
+      _yamlSourceController.text = savedUrl;
+      _fetchExternalYamlExamples(savedUrl);
+    }
   }
 
   @override
@@ -323,6 +726,7 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
         children: [
           _buildHeader(),
           _buildApiKeySection(),
+          _buildYamlSourceSection(),
           if (_isApiKeyValid) _buildChatSection(),
         ],
       ),
@@ -401,6 +805,66 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
               child: Text(
                 'Please enter a valid OpenAI API key',
                 style: TextStyle(color: Colors.red),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildYamlSourceSection() {
+    return Padding(
+      padding: EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'External YAML Examples Source (Optional)',
+            style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+          ),
+          SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _yamlSourceController,
+                  decoration: InputDecoration(
+                    hintText: 'Enter URL to YAML examples',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(width: 8),
+              _isLoadingExamples
+                  ? SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : ElevatedButton(
+                      onPressed: () {
+                        final url = _yamlSourceController.text.trim();
+                        if (url.isNotEmpty) {
+                          _fetchExternalYamlExamples(url);
+                        }
+                      },
+                      child: Text('Load'),
+                    ),
+            ],
+          ),
+          if (_externalSourceUrl != null)
+            Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'External examples loaded from: $_externalSourceUrl',
+                style: TextStyle(
+                  color: Colors.green,
+                  fontSize: 12,
+                ),
               ),
             ),
         ],
