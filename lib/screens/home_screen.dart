@@ -13,6 +13,7 @@ import '../widgets/app_header.dart';
 import '../widgets/project_header.dart';
 import '../widgets/yaml_content_viewer.dart';
 import '../widgets/modern_yaml_tree.dart';
+import '../widgets/ai_assist_panel.dart'; // Import the new AI Assist panel
 import '../theme/app_theme.dart';
 
 // Import web-specific functionality with fallback
@@ -49,6 +50,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showRecentProjects = false; // Whether to show recent projects panel
   bool _collapseCredentials =
       false; // Whether to collapse credentials after fetch
+
+  // New state variable for AI Assist panel
+  bool _showAIAssist = false;
 
   // Track which files are expanded
   Set<String> _expandedFiles = {};
@@ -706,81 +710,112 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
-      body: Column(
-        children: [
-          // Custom app header
-          AppHeader(
-            onNewProject: _handleNewProject,
-            onRecent: _handleRecentProjects,
-            onReload: hasCredentials ? _fetchProjectYaml : null,
-            onAIAssist: hasYaml ? _handleAIAssist : null,
-          ),
-
-          // Project header if we have YAML loaded
-          if (hasYaml)
-            ProjectHeader(
-              projectName: projectDisplayName,
-              viewMode: _selectedViewIndex == 0 ? 'edited_files' : 'tree_view',
-              onViewModeChanged: (mode) {
-                setState(() {
-                  _selectedViewIndex = mode == 'edited_files' ? 0 : 1;
-                });
-              },
-            ),
-
-          // Main content area
-          Expanded(
-            child: !hasYaml
-                ? _buildLoadProjectUI()
-                : Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // Left panel - Tree or Files list
-                        Expanded(
-                          flex: 2,
-                          child: _selectedViewIndex == 0
-                              ? _buildExportFilesView()
-                              : ModernYamlTree(
-                                  yamlFiles: _exportedFiles,
-                                  onFileSelected: (filePath) {
-                                    setState(() {
-                                      _selectedFilePath = filePath;
-                                    });
-                                  },
-                                  expandedNodes: _expandedFiles,
-                                ),
-                        ),
-
-                        const SizedBox(width: 16),
-
-                        // Right panel - YAML Content
-                        Expanded(
-                          flex: 3,
-                          child: YamlContentViewer(
-                            content: _selectedFilePath != null
-                                ? _exportedFiles[_selectedFilePath]
-                                : _rawFetchedYaml,
-                            characterCount: _selectedFilePath != null
-                                ? _exportedFiles[_selectedFilePath]?.length
-                                : _rawFetchedYaml?.length,
-                            isReadOnly: false,
-                            filePath: _selectedFilePath ?? '',
-                            projectId: _projectIdController.text,
-                            onContentChanged: _selectedFilePath != null
-                                ? (content) {
-                                    _applyFileChanges(
-                                        _selectedFilePath!, content);
-                                  }
-                                : null,
-                          ),
-                        ),
-                      ],
-                    ),
+      body: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Custom app header
+                  AppHeader(
+                    onNewProject: _handleNewProject,
+                    onRecent: () {
+                      setState(() {
+                        _showRecentProjects = !_showRecentProjects;
+                      });
+                    },
+                    onReload: hasCredentials ? _fetchProjectYaml : null,
+                    onAIAssist: () {
+                      setState(() {
+                        _showAIAssist = !_showAIAssist;
+                      });
+                    },
                   ),
-          ),
-        ],
+
+                  // Project header if we have YAML loaded
+                  if (hasYaml)
+                    ProjectHeader(
+                      projectName: projectDisplayName,
+                      viewMode: _selectedViewIndex == 0
+                          ? 'edited_files'
+                          : 'tree_view',
+                      onViewModeChanged: (mode) {
+                        setState(() {
+                          _selectedViewIndex = mode == 'edited_files' ? 0 : 1;
+                        });
+                      },
+                    ),
+
+                  // Main content area
+                  Expanded(
+                    child: !hasYaml
+                        ? _buildLoadProjectUI()
+                        : Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // Left panel - Tree or Files list
+                                Expanded(
+                                  flex: 2,
+                                  child: _selectedViewIndex == 0
+                                      ? _buildExportFilesView()
+                                      : ModernYamlTree(
+                                          yamlFiles: _exportedFiles,
+                                          onFileSelected: (filePath) {
+                                            setState(() {
+                                              _selectedFilePath = filePath;
+                                            });
+                                          },
+                                          expandedNodes: _expandedFiles,
+                                        ),
+                                ),
+
+                                const SizedBox(width: 16),
+
+                                // Right panel - YAML Content
+                                Expanded(
+                                  flex: 3,
+                                  child: YamlContentViewer(
+                                    content: _selectedFilePath != null
+                                        ? _exportedFiles[_selectedFilePath]
+                                        : _rawFetchedYaml,
+                                    characterCount: _selectedFilePath != null
+                                        ? _exportedFiles[_selectedFilePath]
+                                            ?.length
+                                        : _rawFetchedYaml?.length,
+                                    isReadOnly: false,
+                                    filePath: _selectedFilePath ?? '',
+                                    projectId: _projectIdController.text,
+                                    onContentChanged: _selectedFilePath != null
+                                        ? (content) {
+                                            _applyFileChanges(
+                                                _selectedFilePath!, content);
+                                          }
+                                        : null,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            // Add AI Assist panel
+            if (_showAIAssist)
+              AIAssistPanel(
+                onUpdateYaml: _updateYamlFromAI,
+                currentFiles: _exportedFiles,
+                onClose: () {
+                  setState(() {
+                    _showAIAssist = false;
+                  });
+                },
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1659,5 +1694,29 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+
+  // Method to handle AI-generated YAML updates
+  void _updateYamlFromAI(String yamlContent) {
+    if (yamlContent.isEmpty) return;
+
+    // Create a new file with AI-generated content
+    final String fileName =
+        'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
+
+    setState(() {
+      _exportedFiles[fileName] = yamlContent;
+      _changedFiles[fileName] = yamlContent;
+      _hasModifications = true;
+      _operationMessage = 'AI-generated YAML file "$fileName" created.';
+      _generatedYamlMessage =
+          '$_operationMessage\n\nThe file has been added to your project.';
+
+      // Auto-expand the new file
+      _expandedFiles.add(fileName);
+
+      // Set the selected file
+      _selectedFilePath = fileName;
+    });
   }
 }
