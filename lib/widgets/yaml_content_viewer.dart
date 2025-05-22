@@ -84,15 +84,30 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         fileKey = fileKey.substring(8);
       }
 
+      // Create request payload
+      final requestBody = json.encode({
+        'projectId': widget.projectId,
+        'fileKey': fileKey,
+        'fileContent': content,
+      });
+
+      // For web, we're using a CORS proxy initialized in index.html
+      final apiUrl = 'https://api.flutterflow.io/v2/validateProjectYaml';
+      print('Sending validation request to: $apiUrl');
+
       final response = await http.post(
-        Uri.parse('https://api.flutterflow.io/validateProjectYaml'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'projectId': widget.projectId,
-          'fileKey': fileKey,
-          'fileContent': content,
-        }),
+        Uri.parse(apiUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          // Add cache control to prevent caching issues
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+        },
+        body: requestBody,
       );
+
+      print('Validation response status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -108,6 +123,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           });
         }
       } else {
+        print('Error response body: ${response.body}');
         setState(() {
           _isValid = false;
           _validationError =
@@ -115,6 +131,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         });
       }
     } catch (e) {
+      print('Validation error: $e');
       setState(() {
         _isValid = false;
         _validationError = 'Validation error: $e';
