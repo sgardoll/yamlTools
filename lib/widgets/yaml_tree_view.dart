@@ -72,12 +72,21 @@ class _YamlTreeViewState extends State<YamlTreeView> {
     final files = widget.yamlFiles.keys.toList()
       ..sort((a, b) => a.compareTo(b));
 
+    // Track processed file paths to avoid duplicates
+    Set<String> processedFiles = {};
+
     for (final filePath in files) {
+      // Skip if we've already processed this file
+      if (processedFiles.contains(filePath)) continue;
+
       // Skip system files, we'll handle them separately
       if (filePath.contains('complete_raw.yaml') ||
           filePath.contains('raw_project.yaml')) {
         continue;
       }
+
+      // Mark as processed
+      processedFiles.add(filePath);
 
       if (!filePath.startsWith('archive_')) continue;
       if (!filePath.endsWith('.yaml')) continue;
@@ -512,6 +521,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
         final isExpanded = _expandedNodes[node.path] ?? false;
         final isSelected =
             node.filePath != null && node.filePath == _selectedFilePath;
+        final hasChildren = node.children.isNotEmpty;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -538,7 +548,7 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                 color: isSelected ? Colors.blue[50] : null,
                 child: Row(
                   children: [
-                    if (node.children.isNotEmpty)
+                    if (hasChildren)
                       Icon(
                         isExpanded ? Icons.arrow_drop_down : Icons.arrow_right,
                         size: 20,
@@ -546,32 +556,55 @@ class _YamlTreeViewState extends State<YamlTreeView> {
                       )
                     else
                       SizedBox(width: 20),
-
                     _getIconForNodeType(node.type, isSelected: isSelected),
-
                     SizedBox(width: 8),
-
                     Expanded(
-                      child: Text(
-                        _getDisplayName(node.name),
-                        style: TextStyle(
-                          fontWeight: (node.type == NodeType.leaf ||
-                                  node.type == NodeType.component ||
-                                  node.type == NodeType.collection ||
-                                  isSelected)
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          color: isSelected ? Colors.blue[800] : null,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _getDisplayName(node.name),
+                              style: TextStyle(
+                                fontWeight: (node.type == NodeType.leaf ||
+                                        node.type == NodeType.component ||
+                                        node.type == NodeType.collection ||
+                                        hasChildren ||
+                                        isSelected)
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: isSelected ? Colors.blue : null,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+
+                          // Show child count badge if node has children
+                          if (hasChildren)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '${node.children.length}',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.black54,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-
-                    // Show a modified indicator if applicable
-                    if (node.filePath != null &&
-                        _isFileModified(node.filePath!))
-                      Icon(Icons.edit_document,
-                          size: 16, color: Colors.amber[800]),
+                    if (_isFileModified(node.filePath ?? ''))
+                      Icon(
+                        Icons.edit,
+                        size: 16,
+                        color: Colors.orange,
+                      ),
                   ],
                 ),
               ),

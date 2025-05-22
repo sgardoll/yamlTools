@@ -9,6 +9,11 @@ import '../storage/preferences_manager.dart';
 import '../widgets/recent_projects_widget.dart';
 import '../widgets/yaml_tree_view.dart'; // Import our new tree view widget
 import '../widgets/diff_view_widget.dart'; // Import our diff view widget
+import '../widgets/app_header.dart';
+import '../widgets/project_header.dart';
+import '../widgets/yaml_content_viewer.dart';
+import '../widgets/modern_yaml_tree.dart';
+import '../theme/app_theme.dart';
 
 // Import web-specific functionality with fallback
 // ignore: avoid_web_libraries_in_flutter
@@ -60,6 +65,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Add a new state field for loading indicator
   bool _isLoading = false;
+
+  // Add a new state field for selected file path
+  String? _selectedFilePath;
 
   // Helper to convert bytes to hex
   String _bytesToHexString(List<int> bytes) {
@@ -683,592 +691,177 @@ class _HomeScreenState extends State<HomeScreen> {
         _apiTokenController.text.isNotEmpty;
     bool hasYaml = _exportedFiles.isNotEmpty || _parsedYamlMap != null;
 
+    String projectDisplayName = _projectIdController.text.isNotEmpty
+        ? "e-script-wallet-hli2m7"
+        : "No Project Loaded";
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text('FlutterFlow YAML Tools'),
-        actions: [
+      backgroundColor: AppTheme.backgroundColor,
+      body: Column(
+        children: [
+          // Custom app header
+          AppHeader(
+            onNewProject: _handleNewProject,
+            onRecent: _handleRecentProjects,
+            onReload: hasCredentials ? _fetchProjectYaml : null,
+            onAIAssist: hasYaml ? _handleAIAssist : null,
+          ),
+
+          // Project header if we have YAML loaded
           if (hasYaml)
-            IconButton(
-              icon: Icon(Icons.refresh, color: Colors.blue),
-              tooltip: 'Reload YAML',
-              onPressed: hasCredentials ? _fetchProjectYaml : null,
+            ProjectHeader(
+              projectName: projectDisplayName,
+              viewMode: _selectedViewIndex == 0 ? 'edited_files' : 'tree_view',
+              onViewModeChanged: (mode) {
+                setState(() {
+                  _selectedViewIndex = mode == 'edited_files' ? 0 : 1;
+                });
+              },
             ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Recent Projects Panel (conditionally shown)
-            if (_showRecentProjects)
-              Expanded(
-                child: Card(
-                  elevation: 4,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Column(
+
+          // Main content area
+          Expanded(
+            child: !hasYaml
+                ? _buildLoadProjectUI()
+                : Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Recent Projects',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close, color: Colors.grey),
-                              onPressed: () {
-                                setState(() {
-                                  _showRecentProjects = false;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                        const Divider(),
+                        // Left panel - Tree or Files list
                         Expanded(
-                          child: RecentProjectsWidget(
-                            onProjectSelected: _handleProjectSelected,
-                            showHeader: false, // Don't show duplicate header
+                          flex: 2,
+                          child: _selectedViewIndex == 0
+                              ? _buildExportFilesView()
+                              : ModernYamlTree(
+                                  yamlFiles: _exportedFiles,
+                                  onFileSelected: (filePath) {
+                                    setState(() {
+                                      _selectedFilePath = filePath;
+                                    });
+                                  },
+                                  expandedNodes: _expandedFiles,
+                                ),
+                        ),
+
+                        const SizedBox(width: 16),
+
+                        // Right panel - YAML Content
+                        Expanded(
+                          flex: 3,
+                          child: YamlContentViewer(
+                            content: _selectedFilePath != null
+                                ? _exportedFiles[_selectedFilePath]
+                                : _rawFetchedYaml,
+                            characterCount: _selectedFilePath != null
+                                ? _exportedFiles[_selectedFilePath]?.length
+                                : _rawFetchedYaml?.length,
+                            isReadOnly: false,
+                            filePath: _selectedFilePath ?? '',
+                            projectId: _projectIdController.text,
+                            onContentChanged: _selectedFilePath != null
+                                ? (content) {
+                                    _applyFileChanges(
+                                        _selectedFilePath!, content);
+                                  }
+                                : null,
                           ),
                         ),
                       ],
                     ),
                   ),
-                ),
-              )
-            else if (_collapseCredentials && hasYaml)
-              // Collapsed Credentials (Small button to expand)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0, vertical: 8.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Icon(Icons.account_circle, color: Colors.blue),
-                            SizedBox(width: 8),
-                            Text(
-                              'Project: ${_projectIdController.text}',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Add system file buttons here
-                      if (_exportedFiles.keys
-                          .any((f) => f.contains('complete_raw.yaml')))
-                        _buildTopBarSystemFileButton(
-                          'complete_raw.yaml',
-                          _exportedFiles.keys.firstWhere(
-                              (f) => f.contains('complete_raw.yaml')),
-                        ),
-                      if (_exportedFiles.keys
-                          .any((f) => f.contains('raw_project.yaml')))
-                        _buildTopBarSystemFileButton(
-                          'raw_project.yaml',
-                          _exportedFiles.keys.firstWhere(
-                              (f) => f.contains('raw_project.yaml')),
-                        ),
-                      SizedBox(width: 8),
-                      Row(
-                        children: [
-                          ElevatedButton.icon(
-                            icon: Icon(
-                              Icons.edit,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              'Edit',
-                              style: TextStyle(
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              elevation: 3,
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: Size(0, 32),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _collapseCredentials = false;
-                              });
-                            },
-                          ),
-                          SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            icon: Icon(
-                              Icons.history,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              'Recent',
-                              style: TextStyle(
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              elevation: 3,
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: Size(0, 32),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _showRecentProjects = true;
-                              });
-                            },
-                          ),
-                          SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            icon: Icon(
-                              Icons.refresh,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              'Reload',
-                              style: TextStyle(
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              elevation: 3,
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: Size(0, 32),
-                            ),
-                            onPressed:
-                                hasCredentials ? _fetchProjectYaml : null,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              // Authentication Section (Full form)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('FlutterFlow Credentials',
-                              style: TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold)),
-                          ElevatedButton.icon(
-                            icon: Icon(
-                              Icons.history,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              'Recent',
-                              style: TextStyle(
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              elevation: 3,
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: Size(0, 32),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _showRecentProjects = true;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 8),
-                      TextField(
-                          controller: _projectIdController,
-                          decoration: InputDecoration(labelText: 'Project ID')),
-                      TextField(
-                          controller: _apiTokenController,
-                          obscureText: true,
-                          decoration: InputDecoration(labelText: 'API Token')),
-                      SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: hasCredentials && !_isLoading
-                                  ? _fetchProjectYaml
-                                  : null,
-                              child: _isLoading
-                                  ? Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        SizedBox(width: 8),
-                                        Text('Fetching...'),
-                                      ],
-                                    )
-                                  : Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.download,
-                                            color: Colors.white),
-                                        SizedBox(width: 8),
-                                        Text('Fetch YAML'),
-                                      ],
-                                    ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                          ),
-                          if (hasYaml) ...[
-                            SizedBox(width: 8),
-                            IconButton(
-                              icon: Icon(Icons.arrow_upward),
-                              tooltip: 'Collapse',
-                              onPressed: () {
-                                setState(() {
-                                  _collapseCredentials = true;
-                                });
-                              },
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // Add view selection UI when files are available
-            if (_exportedFiles.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16.0),
-                child: Row(
-                  children: [
-                    Text('View Mode: ',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    SizedBox(width: 8),
-                    ChoiceChip(
-                      label: Text('Edited Files'),
-                      selected: _selectedViewIndex == 0,
-                      onSelected: (selected) {
-                        if (selected) setState(() => _selectedViewIndex = 0);
-                      },
-                    ),
-                    SizedBox(width: 8),
-                    ChoiceChip(
-                      label: Text('Tree View'),
-                      selected: _selectedViewIndex == 1,
-                      onSelected: (selected) {
-                        if (selected) setState(() => _selectedViewIndex = 1);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-            // Files display section
-            if (hasYaml)
-              Expanded(
-                child: _selectedViewIndex == 0
-                    ? _buildExportFilesView() // Show edited files view
-                    : _buildTreeView(), // Show tree view with integrated file editor
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  // New method to build the tree view
-  Widget _buildTreeView() {
-    return YamlTreeView(
-      yamlFiles: _exportedFiles,
-      onFileEdited: (String filePath, String newContent) {
-        // When a file is edited in the tree view, update it
-        _applyFileChanges(filePath, newContent);
-      },
-      originalFiles: _originalFiles,
-      expandedFiles: _expandedFiles, // Pass the expanded files set
-    );
-  }
+  // Widget to display when no project is loaded
+  Widget _buildLoadProjectUI() {
+    // Determine if we have credentials filled in
+    bool hasCredentials = _projectIdController.text.isNotEmpty &&
+        _apiTokenController.text.isNotEmpty;
 
-  // Existing method renamed for clarity
-  Widget _buildFlatFileListView() {
-    // Use changedFiles if modifications were made, otherwise use exportedFiles
-    Map<String, String> filesToShow =
-        _hasModifications ? _changedFiles : _exportedFiles;
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 600),
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.dividerColor),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Load FlutterFlow Project',
+                style: AppTheme.headingLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
 
-    // Filter out system files that we're now showing in the top bar
-    Map<String, String> filteredFiles = Map.from(filesToShow);
-    filteredFiles.removeWhere((key, value) =>
-        key.contains('complete_raw.yaml') || key.contains('raw_project.yaml'));
-
-    // Make sure our key files are shown first
-    List<String> orderedKeys = filteredFiles.keys.toList();
-
-    // Add modified_yaml.yaml first if it exists
-    if (_hasModifications) {
-      orderedKeys.sort((a, b) {
-        // Give priority to the modified_yaml.yaml file
-        if (a == 'modified_yaml.yaml') return -1;
-        if (b == 'modified_yaml.yaml') return 1;
-        if (a == 'raw_output.yaml') return -1;
-        if (b == 'raw_output.yaml') return 1;
-        return a.compareTo(b);
-      });
-    } else {
-      orderedKeys.sort((a, b) {
-        // Show archive files first
-        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
-        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
-        return a.compareTo(b);
-      });
-    }
-
-    // Count modified files for the badge
-    int modifiedFilesCount = 0;
-    for (var fileName in orderedKeys) {
-      String content = filesToShow[fileName] ?? '';
-
-      // Check if file is modified
-      if (_originalFiles.containsKey(fileName) &&
-          _originalFiles[fileName] != content) {
-        modifiedFilesCount++;
-      }
-    }
-
-    String statusMessage = "Found ${orderedKeys.length} files";
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Text(statusMessage),
-        ),
-        Expanded(
-          child: filesToShow.isEmpty
-              ? Center(
-                  child: Text(
-                      'No YAML files available. ${_parsedYamlMap != null ? "Enter a prompt to make changes." : ""}'),
-                )
-              : ListView.builder(
-                  itemCount: orderedKeys.length,
-                  itemBuilder: (context, index) {
-                    String fileName = orderedKeys[index];
-
-                    // Skip compact treatment for system files since they're now in the top bar
-                    // if (fileName.contains('complete_raw.yaml') ||
-                    //     fileName.contains('raw_project.yaml')) {
-                    //   return _buildCompactFileCard(
-                    //       fileName, filesToShow[fileName] ?? '');
-                    // }
-
-                    String fileContent = filesToShow[fileName] ?? '';
-                    bool isExpanded = _expandedFiles.contains(fileName);
-
-                    // Debug file sizes
-                    print(
-                        'DEBUG: File "$fileName" size: ${fileContent.length} chars');
-
-                    // Determine if file was deleted
-                    bool isDeleted = fileContent ==
-                        "# This file was removed in the latest changes";
-
-                    // Highlight the complete raw file
-                    bool isCompleteRaw = fileName.contains('complete_raw.yaml');
-
-                    // Highlight archive files
-                    bool isArchiveFile = fileName.startsWith('archive_');
-
-                    // Prepare or get a TextEditingController for this file if needed
-                    if (!_fileControllers.containsKey(fileName)) {
-                      _fileControllers[fileName] =
-                          TextEditingController(text: fileContent);
-                    }
-
-                    bool isEditing = _fileEditModes[fileName] == true;
-                    bool wasModified = _originalFiles.containsKey(fileName) &&
-                        _originalFiles[fileName] != fileContent;
-
-                    // Get background color based on file type and modified status
-                    Color? bgColor;
-
-                    if (wasModified) {
-                      bgColor = Colors.yellow[50]; // Highlight modified files
-                    } else if (isCompleteRaw) {
-                      bgColor = Colors.blue[50]; // Highlight complete raw file
-                    } else if (isArchiveFile) {
-                      bgColor =
-                          Colors.grey[50]; // Subtle highlight for archive files
-                    }
-
-                    return Card(
-                      color: bgColor,
-                      margin: EdgeInsets.all(4.0),
-                      child: ExpansionTile(
-                        key: Key(
-                            fileName), // Use a key to maintain expansion state
-                        initiallyExpanded: isExpanded,
-                        onExpansionChanged: (expanded) {
-                          setState(() {
-                            if (expanded) {
-                              _expandedFiles.add(fileName);
-                            } else {
-                              _expandedFiles.remove(fileName);
-                            }
-                          });
-                        },
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                fileName,
-                                style: TextStyle(
-                                  fontWeight: wasModified || isCompleteRaw
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                            ),
-                            if (wasModified)
-                              Chip(
-                                label: Text('Modified'),
-                                backgroundColor: Colors.yellow[100],
-                                labelStyle: TextStyle(fontSize: 10),
-                                padding: EdgeInsets.zero,
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                              ),
-                          ],
-                        ),
-                        subtitle: Text(
-                          '${fileContent.length} characters',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: isEditing
-                                ? Column(
-                                    children: [
-                                      TextField(
-                                        controller: _fileControllers[fileName],
-                                        maxLines: null,
-                                        decoration: InputDecoration(
-                                          border: OutlineInputBorder(),
-                                          filled: true,
-                                          fillColor: Colors.white,
-                                        ),
-                                        style:
-                                            TextStyle(fontFamily: 'monospace'),
-                                      ),
-                                      SizedBox(height: 8),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceEvenly,
-                                        children: [
-                                          ElevatedButton.icon(
-                                            icon: Icon(Icons.save,
-                                                size: 16, color: Colors.white),
-                                            label: Text('Save'),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.green,
-                                              foregroundColor: Colors.white,
-                                            ),
-                                            onPressed: () {
-                                              _applyFileChanges(
-                                                  fileName,
-                                                  _fileControllers[fileName]!
-                                                      .text);
-                                              setState(() {
-                                                _fileEditModes[fileName] =
-                                                    false;
-                                              });
-                                            },
-                                          ),
-                                          TextButton.icon(
-                                            icon: Icon(Icons.cancel,
-                                                size: 16, color: Colors.red),
-                                            label: Text('Cancel'),
-                                            style: TextButton.styleFrom(
-                                              foregroundColor: Colors.red,
-                                            ),
-                                            onPressed: () {
-                                              setState(() {
-                                                _fileEditModes[fileName] =
-                                                    false;
-                                                _fileControllers[fileName]!
-                                                        .text =
-                                                    filesToShow[fileName] ?? '';
-                                              });
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  )
-                                : GestureDetector(
-                                    onTap: () {
-                                      // Enter edit mode when text is clicked
-                                      setState(() {
-                                        _fileEditModes[fileName] = true;
-                                        _fileControllers[fileName]!.text =
-                                            fileContent;
-                                      });
-                                    },
-                                    child: Container(
-                                      color: Colors
-                                          .transparent, // Makes the entire area tappable
-                                      width: double.infinity,
-                                      child: SingleChildScrollView(
-                                        child: Text(
-                                          fileContent,
-                                          style: TextStyle(
-                                              fontFamily: 'monospace'),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+              // Project ID field
+              TextField(
+                controller: _projectIdController,
+                decoration: InputDecoration(
+                  labelText: 'Project ID',
+                  hintText: 'Enter your FlutterFlow project ID',
+                  prefixIcon: const Icon(Icons.folder_outlined),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
+              ),
+              const SizedBox(height: 16),
+
+              // API Token field
+              TextField(
+                controller: _apiTokenController,
+                decoration: InputDecoration(
+                  labelText: 'API Token',
+                  hintText: 'Enter your FlutterFlow API token',
+                  prefixIcon: const Icon(Icons.key),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                obscureText: true,
+              ),
+              const SizedBox(height: 24),
+
+              // Fetch YAML button
+              ElevatedButton.icon(
+                onPressed: hasCredentials ? _fetchProjectYaml : null,
+                icon: const Icon(Icons.download, size: 18),
+                label: const Text('Fetch YAML'),
+                style: AppTheme.primaryButtonStyle,
+              ),
+
+              const SizedBox(height: 24),
+
+              // Recent projects section - Using only one heading
+              const Text(
+                'Recent Projects',
+                style: AppTheme.headingSmall,
+              ),
+              const SizedBox(height: 8),
+
+              // Recent projects widget - passing showHeader: false to avoid duplicate heading
+              SizedBox(
+                height: 200,
+                child: RecentProjectsWidget(
+                  onProjectSelected: _handleProjectSelected,
+                  showHeader: false, // Don't show the header in the widget
+                ),
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
     );
   }
 
@@ -2009,6 +1602,52 @@ class _HomeScreenState extends State<HomeScreen> {
             _expandedFiles.add(filePath); // Mark as expanded
           });
         },
+      ),
+    );
+  }
+
+  // Handler for New Project button
+  void _handleNewProject() {
+    setState(() {
+      _projectIdController.clear();
+      _apiTokenController.clear();
+      _rawFetchedYaml = null;
+      _parsedYamlMap = null;
+      _generatedYamlMessage =
+          "Enter Project ID and API Token, then click 'Fetch YAML'.";
+      _operationMessage = "";
+      _exportedFiles.clear();
+      _originalFiles.clear();
+      _changedFiles.clear();
+      _fileControllers.clear();
+      _fileEditModes.clear();
+      _hasModifications = false;
+    });
+  }
+
+  // Handler for Recent Projects button
+  void _handleRecentProjects() {
+    setState(() {
+      _showRecentProjects = true;
+    });
+  }
+
+  // Handler for AI Assist button
+  void _handleAIAssist() {
+    // This would normally trigger an AI assistant for YAML editing
+    // For now, we'll just show a simple dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('AI Assist'),
+        content: const Text(
+            'AI assistance for YAML editing will be available in a future update.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
