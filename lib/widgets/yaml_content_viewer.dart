@@ -82,7 +82,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       if (apiToken == null || apiToken.isEmpty) {
         setState(() {
           _isValid = false;
-          _validationError = 'API token not found. Please set your API token.';
+          _validationError =
+              '🔑 API token missing. Please set your FlutterFlow API token in settings.';
         });
         return;
       }
@@ -118,6 +119,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       );
 
       print('Validation response status: ${response.statusCode}');
+      print('Validation response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -127,24 +129,61 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             _validationError = null;
           });
         } else {
+          final errorMsg = data['error'] ?? 'Invalid YAML format';
           setState(() {
             _isValid = false;
-            _validationError = data['error'] ?? 'Invalid YAML format';
+            _validationError = '❌ Validation Error: $errorMsg';
           });
         }
-      } else {
-        print('Error response body: ${response.body}');
+      } else if (response.statusCode == 400) {
+        // Parse detailed validation errors
+        try {
+          final errorData = json.decode(response.body);
+          String detailedError = 'YAML Validation Failed:\n';
+
+          if (errorData['error'] != null) {
+            detailedError += '• ${errorData['error']}\n';
+          }
+          if (errorData['message'] != null) {
+            detailedError += '• ${errorData['message']}\n';
+          }
+
+          setState(() {
+            _isValid = false;
+            _validationError = detailedError.trim();
+          });
+        } catch (e) {
+          setState(() {
+            _isValid = false;
+            _validationError =
+                '❌ Validation failed (HTTP ${response.statusCode}): ${response.body}';
+          });
+        }
+      } else if (response.statusCode == 401) {
         setState(() {
           _isValid = false;
           _validationError =
-              'Validation failed: Server error ${response.statusCode}';
+              '🔑 Authentication failed. Please check your API token.';
+        });
+      } else if (response.statusCode == 403) {
+        setState(() {
+          _isValid = false;
+          _validationError =
+              '🚫 Access denied. Check your API token permissions.';
+        });
+      } else {
+        setState(() {
+          _isValid = false;
+          _validationError =
+              '🌐 Server error (${response.statusCode}). Try again later.';
         });
       }
     } catch (e) {
       print('Validation error: $e');
       setState(() {
         _isValid = false;
-        _validationError = 'Validation error: $e';
+        _validationError =
+            '🌐 Network error: Unable to connect to FlutterFlow API. Check your internet connection.';
       });
     } finally {
       setState(() {
@@ -545,12 +584,12 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             },
       child: Container(
         padding: const EdgeInsets.all(16),
-        color: Colors.grey[50], // Light background for better readability
+        color: AppTheme.backgroundColor,
         child: SingleChildScrollView(
           child: Text(
             content,
             style: AppTheme.monospace.copyWith(
-              color: Colors.black87, // Dark text for visibility
+              color: AppTheme.textPrimary, // Use theme's white text
             ),
           ),
         ),
@@ -561,11 +600,11 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   Widget _buildEditor() {
     return Container(
       padding: const EdgeInsets.all(16),
-      color: Colors.grey[50], // Match the viewer background
+      color: AppTheme.backgroundColor,
       child: TextField(
         controller: _textController,
         style: AppTheme.monospace.copyWith(
-          color: Colors.black87, // Explicit dark text
+          color: AppTheme.textPrimary, // Use theme's white text
         ),
         maxLines: null,
         expands: true,
@@ -573,13 +612,13 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         textAlignVertical: TextAlignVertical.top,
         decoration: InputDecoration(
           filled: true,
-          fillColor: Colors.white, // White background for the text field
+          fillColor: AppTheme.surfaceColor, // Dark surface color
           border: OutlineInputBorder(
-            borderSide: BorderSide(color: Colors.grey[400]!),
+            borderSide: BorderSide(color: AppTheme.dividerColor),
             borderRadius: BorderRadius.circular(4),
           ),
           enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: Colors.grey[400]!),
+            borderSide: BorderSide(color: AppTheme.dividerColor),
             borderRadius: BorderRadius.circular(4),
           ),
           focusedBorder: OutlineInputBorder(
@@ -588,7 +627,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           ),
           contentPadding: const EdgeInsets.all(12),
           hintText: 'Enter YAML content...',
-          hintStyle: TextStyle(color: Colors.grey[600]),
+          hintStyle: TextStyle(color: AppTheme.textMuted),
         ),
       ),
     );
