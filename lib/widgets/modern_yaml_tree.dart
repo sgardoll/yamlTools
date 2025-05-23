@@ -36,12 +36,14 @@ class ModernYamlTree extends StatefulWidget {
   final Map<String, String> yamlFiles;
   final Function(String)? onFileSelected;
   final Set<String>? expandedNodes;
+  final Map<String, DateTime>? validationTimestamps;
 
   const ModernYamlTree({
     Key? key,
     required this.yamlFiles,
     this.onFileSelected,
     this.expandedNodes,
+    this.validationTimestamps,
   }) : super(key: key);
 
   @override
@@ -295,6 +297,11 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     bool isSelected = node.filePath == _selectedFilePath;
     bool hasChildren = node.children.isNotEmpty;
 
+    // Check if this file has been validated recently
+    bool isValidated = node.filePath != null &&
+        widget.validationTimestamps != null &&
+        widget.validationTimestamps!.containsKey(node.filePath!);
+
     // Get the icon based on node type
     IconData icon = _getNodeIcon(node.type);
     Color iconColor = _getNodeColor(node.type);
@@ -390,9 +397,45 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  // Show validation indicator for validated files
+                  if (isValidated) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4.0),
+                      child: Tooltip(
+                        message: 'Recently validated and saved',
+                        child: Icon(
+                          Icons.check_circle,
+                          size: 14,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4.0),
+                      child: Container(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.green[100],
+                          borderRadius: BorderRadius.circular(6),
+                          border:
+                              Border.all(color: Colors.green[300]!, width: 1),
+                        ),
+                        child: Text(
+                          'Valid',
+                          style: TextStyle(
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[800],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                   // Add badge to show child count if has children
                   if (hasChildren)
                     Container(
+                      margin: const EdgeInsets.only(left: 4),
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(

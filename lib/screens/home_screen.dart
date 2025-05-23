@@ -43,6 +43,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, TextEditingController> _fileControllers =
       {}; // For editing YAML files
   Map<String, bool> _fileEditModes = {}; // Track which files are in edit mode
+  Map<String, DateTime> _fileValidationTimestamps =
+      {}; // Track when files were validated successfully
 
   bool _showExportView = true; // Default to export view
   bool _isOutputExpanded = false; // For expandable output section
@@ -233,9 +235,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Handle selecting a project from recent projects list
-  void _handleProjectSelected(String projectId) {
+  void _handleProjectSelected(String projectId) async {
+    // Load the saved API token
+    final savedApiToken = await PreferencesManager.getApiKey();
+
     setState(() {
       _projectIdController.text = projectId;
+      if (savedApiToken != null && savedApiToken.isNotEmpty) {
+        _apiTokenController.text = savedApiToken;
+      }
       _showRecentProjects = false;
     });
   }
@@ -254,6 +262,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _exportedFiles[fileName] = newContent;
         _changedFiles[fileName] = newContent;
         _hasModifications = true;
+
+        // Track validation timestamp when file is saved
+        _fileValidationTimestamps[fileName] = DateTime.now();
 
         // Update the message to indicate a manual edit was made
         _operationMessage = 'File "$fileName" manually edited.';
@@ -298,6 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _changedFiles.clear();
       _fileControllers.clear(); // Clear any existing file editors
       _fileEditModes.clear();
+      _fileValidationTimestamps.clear(); // Clear validation timestamps
       _hasModifications = false; // Reset modification state for fresh fetch
       _expandedFiles.clear(); // Clear expanded files state
       _collapseCredentials = true; // Collapse credentials after fetch
@@ -720,17 +732,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   // Custom app header
                   AppHeader(
                     onNewProject: _handleNewProject,
-                    onRecent: () {
-                      setState(() {
-                        _showRecentProjects = !_showRecentProjects;
-                      });
-                    },
+                    onRecent: _handleRecentProjects,
                     onReload: hasCredentials ? _fetchProjectYaml : null,
-                    onAIAssist: () {
-                      setState(() {
-                        _showAIAssist = !_showAIAssist;
-                      });
-                    },
+                    onAIAssist: _handleAIAssist,
                   ),
 
                   // Project header if we have YAML loaded
@@ -769,6 +773,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                             });
                                           },
                                           expandedNodes: _expandedFiles,
+                                          validationTimestamps:
+                                              _fileValidationTimestamps,
                                         ),
                                 ),
 
@@ -808,11 +814,7 @@ class _HomeScreenState extends State<HomeScreen> {
               AIAssistPanel(
                 onUpdateYaml: _updateYamlFromAI,
                 currentFiles: _exportedFiles,
-                onClose: () {
-                  setState(() {
-                    _showAIAssist = false;
-                  });
-                },
+                onClose: _handleAIAssist,
               ),
           ],
         ),
@@ -926,6 +928,22 @@ class _HomeScreenState extends State<HomeScreen> {
     // Add modified_yaml.yaml first if it exists
     if (_hasModifications) {
       orderedKeys.sort((a, b) {
+        // First check if files have validation timestamps - recently validated files go to top
+        DateTime? timestampA = _fileValidationTimestamps[a];
+        DateTime? timestampB = _fileValidationTimestamps[b];
+
+        if (timestampA != null && timestampB != null) {
+          // Both have timestamps, sort by most recent first
+          return timestampB.compareTo(timestampA);
+        } else if (timestampA != null) {
+          // Only A has timestamp, it goes first
+          return -1;
+        } else if (timestampB != null) {
+          // Only B has timestamp, it goes first
+          return 1;
+        }
+
+        // Neither has timestamp, fall back to original priority logic
         // Give priority to the modified_yaml.yaml file
         if (a == 'modified_yaml.yaml') return -1;
         if (b == 'modified_yaml.yaml') return 1;
@@ -1132,6 +1150,57 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     Icons.edit_document,
                                                     size: 16,
                                                     color: Colors.amber[800],
+                                                  ),
+                                                ),
+                                              // Show validation indicator for recently validated files
+                                              if (_fileValidationTimestamps
+                                                  .containsKey(fileName))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 4.0),
+                                                  child: Tooltip(
+                                                    message:
+                                                        'Recently validated and saved',
+                                                    child: Icon(
+                                                      Icons.check_circle,
+                                                      size: 16,
+                                                      color: Colors.green[700],
+                                                    ),
+                                                  ),
+                                                ),
+                                              // Show "Valid" text badge for recently validated files
+                                              if (_fileValidationTimestamps
+                                                  .containsKey(fileName))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 6.0),
+                                                  child: Container(
+                                                    padding:
+                                                        EdgeInsets.symmetric(
+                                                            horizontal: 6,
+                                                            vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.green[100],
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              8),
+                                                      border: Border.all(
+                                                          color: Colors
+                                                              .green[300]!,
+                                                          width: 1),
+                                                    ),
+                                                    child: Text(
+                                                      'Valid',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color:
+                                                            Colors.green[800],
+                                                      ),
+                                                    ),
                                                   ),
                                                 ),
                                             ],
@@ -1565,91 +1634,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // New method to build a compact file card for important system files
-  Widget _buildCompactFileCard(String fileName, String content) {
-    return Card(
-      margin: EdgeInsets.only(bottom: 8),
-      color: Colors.grey[100],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          children: [
-            Icon(Icons.description, size: 16, color: Colors.blue[800]),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                fileName,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                  color: Colors.blue[800],
-                ),
-              ),
-            ),
-            Text(
-              '${content.length} chars',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-            SizedBox(width: 8),
-            ElevatedButton(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.copy, size: 16, color: Colors.white),
-                  SizedBox(width: 4),
-                  Text('Copy', style: TextStyle(fontSize: 12)),
-                ],
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                minimumSize: Size(0, 32),
-              ),
-              onPressed: () {
-                _fallbackClipboardCopy(context, fileName, content);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Add new helper method for system file buttons in the top bar
-  Widget _buildTopBarSystemFileButton(String displayName, String filePath) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8.0),
-      child: ElevatedButton.icon(
-        icon: Icon(
-          Icons.description,
-          size: 16,
-          color: Colors.white,
-        ),
-        label: Text(
-          displayName.replaceAll('.yaml', ''),
-          style: TextStyle(
-            fontSize: 12,
-          ),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.blue,
-          foregroundColor: Colors.white,
-          elevation: 3,
-          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-          minimumSize: Size(0, 32),
-        ),
-        onPressed: () {
-          // Switch to tree view and select this file
-          setState(() {
-            _selectedViewIndex = 1; // Switch to tree view
-            _expandedFiles.add(filePath); // Mark as expanded
-          });
-        },
-      ),
-    );
-  }
-
   // Handler for New Project button
   void _handleNewProject() {
     setState(() {
@@ -1665,13 +1649,20 @@ class _HomeScreenState extends State<HomeScreen> {
       _changedFiles.clear();
       _fileControllers.clear();
       _fileEditModes.clear();
+      _fileValidationTimestamps.clear(); // Clear validation timestamps
       _hasModifications = false;
     });
   }
 
   // Handler for Recent Projects button
-  void _handleRecentProjects() {
+  void _handleRecentProjects() async {
+    // Load the saved API token
+    final savedApiToken = await PreferencesManager.getApiKey();
+
     setState(() {
+      if (savedApiToken != null && savedApiToken.isNotEmpty) {
+        _apiTokenController.text = savedApiToken;
+      }
       _showRecentProjects = true;
     });
   }
@@ -1699,6 +1690,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _exportedFiles[existingFile] = yamlContent;
         _changedFiles[existingFile] = yamlContent;
         _hasModifications = true;
+
+        // Track validation timestamp for AI-generated changes
+        _fileValidationTimestamps[existingFile] = DateTime.now();
+
         _operationMessage =
             'File "$existingFile" updated with AI-generated changes.';
         _generatedYamlMessage = _operationMessage;
@@ -1723,6 +1718,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _exportedFiles[fileName] = yamlContent;
         _changedFiles[fileName] = yamlContent;
         _hasModifications = true;
+
+        // Track validation timestamp for new AI-generated file
+        _fileValidationTimestamps[fileName] = DateTime.now();
+
         _operationMessage = 'AI-generated YAML file "$fileName" created.';
         _generatedYamlMessage =
             '$_operationMessage\n\nThe file has been added to your project.';
