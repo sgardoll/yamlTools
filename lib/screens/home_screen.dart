@@ -16,10 +16,13 @@ import '../widgets/modern_yaml_tree.dart';
 import '../widgets/ai_assist_panel.dart'; // Import the new AI Assist panel
 import '../services/flutterflow_api_service.dart'; // Import FlutterFlow API service
 import '../theme/app_theme.dart';
-
-// Import web-specific functionality with fallback
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as web; // This will only compile on web
+// import '../services/validation_service.dart'; // File doesn't exist
+// import '../services/yaml_service.dart'; // File doesn't exist
+// import '../services/yaml_comparison_service.dart'; // File doesn't exist
+// import '../widgets/export_files_view.dart'; // File doesn't exist
+// Import web-specific functionality conditionally
+import '../web_file_download.dart'
+    if (dart.library.io) '../no_op_file_download.dart' as file_download;
 
 // We're not using conditional imports
 

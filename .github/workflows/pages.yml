@@ -46,6 +46,9 @@ jobs:
           channel: "stable"
           cache: true # Enable caching for faster builds
 
+      - name: Enable web platform
+        run: flutter config --enable-web
+
       - name: Get Flutter dependencies
         run: flutter pub get
 
@@ -78,9 +81,7 @@ jobs:
           flutter build web \
             --release \
             --base-href "/yamlTools/" \
-            --web-renderer canvaskit \
-            --csp \
-            --no-tree-shake-icons
+            --web-renderer auto
 
       - name: Fix GitHub Pages deployment issues
         run: |
@@ -92,16 +93,18 @@ jobs:
           # Create 404.html for SPA routing
           cp index.html 404.html
 
-          # Fix base href in index.html to ensure proper loading
-          sed -i 's|<base href="/yamlTools/">|<base href="/yamlTools/">|g' index.html
-
           # Verify critical files exist
           echo "🔍 Verifying build files:"
-          ls -la main.dart.js flutter.js canvaskit/ || echo "Some files missing"
+          ls -la main.dart.js flutter.js || echo "Some JS files missing"
+          ls -la canvaskit/ || echo "Canvaskit directory missing"
 
-          # Check if index.html is valid
-          echo "📄 Index.html first few lines:"
-          head -20 index.html
+          # Check if index.html is valid and show its content
+          echo "📄 Index.html content:"
+          cat index.html
+
+          # Verify the base href was set correctly
+          echo "🔍 Checking base href:"
+          grep -n "base href" index.html || echo "Base href not found"
 
       - name: Verify build output
         run: |
@@ -110,6 +113,10 @@ jobs:
           echo "📂 Assets and icons:"
           ls -la build/web/assets/ || echo "No assets directory"
           ls -la build/web/icons/ || echo "No icons directory"
+          echo "📄 Critical files check:"
+          test -f build/web/main.dart.js && echo "✅ main.dart.js exists" || echo "❌ main.dart.js missing"
+          test -f build/web/flutter.js && echo "✅ flutter.js exists" || echo "❌ flutter.js missing"
+          test -f build/web/flutter_bootstrap.js && echo "✅ flutter_bootstrap.js exists" || echo "❌ flutter_bootstrap.js missing"
 
       - name: Upload artifact to GitHub Pages
         uses: actions/upload-pages-artifact@v3
