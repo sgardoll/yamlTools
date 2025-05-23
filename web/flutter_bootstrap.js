@@ -13,7 +13,7 @@
   if (typeof _flutter !== "undefined" && _flutter.loader) {
     _flutter.loader.load({
       serviceWorkerSettings: {
-        serviceWorkerVersion: "{{flutter_service_worker_version}}",
+        serviceWorkerVersion: null,
       },
       onEntrypointLoaded: function (engineInitializer) {
         engineInitializer.initializeEngine().then(function (appRunner) {
@@ -30,7 +30,7 @@
       if (typeof _flutter !== "undefined" && _flutter.loader) {
         _flutter.loader.load({
           serviceWorkerSettings: {
-            serviceWorkerVersion: "{{flutter_service_worker_version}}",
+            serviceWorkerVersion: null,
           },
         });
       }
