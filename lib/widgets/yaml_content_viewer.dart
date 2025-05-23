@@ -209,7 +209,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       if (apiToken == null || apiToken.isEmpty) {
         print('API token not found for update');
         setState(() {
-          _validationError = 'API token not found for update';
+          _validationError =
+              '🔑 API token missing for update. Please set your FlutterFlow API token.';
           _isValid = false;
         });
         return;
@@ -242,10 +243,65 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       }
     } catch (e) {
       print('Error updating file via API: $e');
-      // Show the update error in the UI
+
+      // Parse the error message for better user communication
+      String userFriendlyError;
+      String errorString = e.toString();
+
+      if (errorString.contains('400')) {
+        // Parse specific 400 errors
+        if (errorString.contains('Expected int or stringified int')) {
+          userFriendlyError =
+              '🔢 YAML Error: Expected a number or quoted number. Check your YAML syntax for numeric values.';
+        } else if (errorString.contains('Invalid file key')) {
+          userFriendlyError =
+              '🗂️ File Error: Invalid file path for FlutterFlow. This file may not be supported.';
+        } else if (errorString.contains('(')) {
+          // Try to extract line/column info: "(2:3)"
+          final lineColMatch =
+              RegExp(r'\((\d+):(\d+)\)').firstMatch(errorString);
+          if (lineColMatch != null) {
+            final line = lineColMatch.group(1);
+            final col = lineColMatch.group(2);
+            userFriendlyError =
+                '📍 YAML Syntax Error at Line $line, Column $col:\n';
+
+            if (errorString.contains('Expected int')) {
+              userFriendlyError += '• Expected a number or quoted number\n';
+            } else if (errorString.contains('mapping')) {
+              userFriendlyError +=
+                  '• YAML structure error - check indentation\n';
+            } else {
+              userFriendlyError += '• Invalid YAML syntax\n';
+            }
+            userFriendlyError +=
+                '💡 Tip: Check quotes, indentation, and data types';
+          } else {
+            userFriendlyError = '❌ YAML Update Error: $errorString';
+          }
+        } else {
+          userFriendlyError =
+              '❌ Update Failed: Invalid YAML format. Check your syntax.';
+        }
+      } else if (errorString.contains('401')) {
+        userFriendlyError =
+            '🔑 Authentication Error: Invalid API token. Please check your credentials.';
+      } else if (errorString.contains('403')) {
+        userFriendlyError =
+            '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
+      } else if (errorString.contains('404')) {
+        userFriendlyError =
+            '🔍 Project Not Found: Check your project ID or API token.';
+      } else if (errorString.contains('Network error') ||
+          errorString.contains('Connection')) {
+        userFriendlyError =
+            '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
+      } else {
+        userFriendlyError = '⚠️ Update Failed: $errorString';
+      }
+
       setState(() {
-        _validationError =
-            'Update failed: ${e.toString().contains('Invalid file key') ? 'Invalid file key for FlutterFlow' : 'Network error'}';
+        _validationError = userFriendlyError;
         _isValid = false;
       });
     } finally {
@@ -279,18 +335,49 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           // Validation error display
           if (_validationError != null)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: AppTheme.errorColor.withOpacity(0.1),
-              child: Row(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.errorColor.withOpacity(0.1),
+                border: Border.all(color: AppTheme.errorColor.withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.error_outline,
-                      color: AppTheme.errorColor, size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(
+                  Row(
+                    children: [
+                      Icon(Icons.error_outline,
+                          color: AppTheme.errorColor, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Error Details',
+                          style: TextStyle(
+                            color: AppTheme.errorColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.backgroundColor,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: AppTheme.dividerColor),
+                    ),
                     child: Text(
                       _validationError!,
-                      style:
-                          TextStyle(color: AppTheme.errorColor, fontSize: 13),
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 14,
+                        fontFamily: 'monospace',
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ],
