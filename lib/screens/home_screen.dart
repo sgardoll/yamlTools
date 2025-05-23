@@ -14,6 +14,7 @@ import '../widgets/project_header.dart';
 import '../widgets/yaml_content_viewer.dart';
 import '../widgets/modern_yaml_tree.dart';
 import '../widgets/ai_assist_panel.dart'; // Import the new AI Assist panel
+import '../services/flutterflow_api_service.dart'; // Import FlutterFlow API service
 import '../theme/app_theme.dart';
 
 // Import web-specific functionality with fallback
@@ -249,7 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Apply changes to a file and update modification tracking
-  void _applyFileChanges(String fileName, String newContent) {
+  Future<void> _applyFileChanges(String fileName, String newContent) async {
     // Only update if content has actually changed
     if (_exportedFiles[fileName] != newContent) {
       setState(() {
@@ -270,6 +271,64 @@ class _HomeScreenState extends State<HomeScreen> {
         _operationMessage = 'File "$fileName" manually edited.';
         _generatedYamlMessage =
             '$_operationMessage\n\nThe file has been updated.';
+      });
+
+      // After successful save, call FlutterFlow API to update the project
+      await _updateFlutterFlowProject(fileName, newContent);
+    }
+  }
+
+  // Update the FlutterFlow project with the changed file
+  Future<void> _updateFlutterFlowProject(
+      String fileName, String content) async {
+    final projectId = _projectIdController.text;
+    final apiToken = _apiTokenController.text;
+
+    // Skip API call if we don't have project credentials
+    if (projectId.isEmpty || apiToken.isEmpty) {
+      print('Skipping FlutterFlow API call - missing project ID or API token');
+      return;
+    }
+
+    try {
+      // Test file key conversion for debugging
+      print('Testing file key conversion logic:');
+      FlutterFlowApiService.testFileKeyConversion();
+
+      // Convert the single file to the format expected by the API
+      final fileKey = FlutterFlowApiService.getFileKey(fileName);
+      final fileKeyToContent = {fileKey: content};
+
+      print(
+          'Sending updated YAML to FlutterFlow for file: $fileName (key: $fileKey)');
+      print('Original filename: "$fileName"');
+      print('Converted file key: "$fileKey"');
+      print('Content length: ${content.length} chars');
+
+      // Call the FlutterFlow API
+      await FlutterFlowApiService.updateProjectYaml(
+        projectId: projectId,
+        apiToken: apiToken,
+        fileKeyToContent: fileKeyToContent,
+      );
+
+      // Update the UI to show success
+      setState(() {
+        _operationMessage = 'File "$fileName" saved and synced to FlutterFlow.';
+        _generatedYamlMessage =
+            '$_operationMessage\n\nThe file has been updated in your FlutterFlow project.';
+      });
+
+      print('Successfully updated FlutterFlow project with file: $fileName');
+    } catch (e) {
+      print('Error updating FlutterFlow project: $e');
+
+      // Update the UI to show the error
+      setState(() {
+        _operationMessage =
+            'File "$fileName" saved locally, but failed to sync to FlutterFlow.';
+        _generatedYamlMessage =
+            '$_operationMessage\n\nError: $e\n\nThe file has been updated locally but not synced to FlutterFlow.';
       });
     }
   }
@@ -717,7 +776,7 @@ class _HomeScreenState extends State<HomeScreen> {
     bool hasYaml = _exportedFiles.isNotEmpty || _parsedYamlMap != null;
 
     String projectDisplayName = _projectIdController.text.isNotEmpty
-        ? "e-script-wallet-hli2m7"
+        ? (_projectName.isNotEmpty ? _projectName : _projectIdController.text)
         : "No Project Loaded";
 
     return Scaffold(
@@ -795,8 +854,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     filePath: _selectedFilePath ?? '',
                                     projectId: _projectIdController.text,
                                     onContentChanged: _selectedFilePath != null
-                                        ? (content) {
-                                            _applyFileChanges(
+                                        ? (content) async {
+                                            await _applyFileChanges(
                                                 _selectedFilePath!, content);
                                           }
                                         : null,
@@ -1004,10 +1063,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
               ],
             ),
-            SizedBox(width: 8),
+            SizedBox(width: 16),
             Text(statusMessage,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-            Spacer(),
           ],
         ),
         SizedBox(height: 8),
@@ -1223,8 +1281,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                   backgroundColor: Colors.green,
                                                   foregroundColor: Colors.white,
                                                 ),
-                                                onPressed: () {
-                                                  _applyFileChanges(
+                                                onPressed: () async {
+                                                  await _applyFileChanges(
                                                       fileName,
                                                       _fileControllers[
                                                               fileName]!
@@ -1731,6 +1789,67 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Set the selected file
         _selectedFilePath = fileName;
+      });
+    }
+  }
+
+  // Update all modified files in FlutterFlow project at once
+  Future<void> _saveAllToFlutterFlow() async {
+    final projectId = _projectIdController.text;
+    final apiToken = _apiTokenController.text;
+
+    // Skip API call if we don't have project credentials
+    if (projectId.isEmpty || apiToken.isEmpty) {
+      setState(() {
+        _operationMessage =
+            'Cannot save to FlutterFlow - missing project ID or API token.';
+        _generatedYamlMessage = _operationMessage;
+      });
+      return;
+    }
+
+    // Get all files that have been modified
+    if (_changedFiles.isEmpty) {
+      setState(() {
+        _operationMessage = 'No modified files to save.';
+        _generatedYamlMessage = _operationMessage;
+      });
+      return;
+    }
+
+    setState(() {
+      _operationMessage =
+          'Saving ${_changedFiles.length} files to FlutterFlow...';
+      _generatedYamlMessage = _operationMessage;
+    });
+
+    try {
+      print('Saving ${_changedFiles.length} files to FlutterFlow...');
+
+      // Call the FlutterFlow API with all changed files
+      await FlutterFlowApiService.updateMultipleProjectYamls(
+        projectId: projectId,
+        apiToken: apiToken,
+        fileNameToContent: _changedFiles,
+      );
+
+      // Update the UI to show success
+      setState(() {
+        _operationMessage =
+            'Successfully saved ${_changedFiles.length} files to FlutterFlow.';
+        _generatedYamlMessage =
+            '$_operationMessage\n\nAll modified files have been synced to your FlutterFlow project.';
+      });
+
+      print('Successfully saved all files to FlutterFlow');
+    } catch (e) {
+      print('Error saving files to FlutterFlow: $e');
+
+      // Update the UI to show the error
+      setState(() {
+        _operationMessage = 'Failed to save files to FlutterFlow.';
+        _generatedYamlMessage =
+            '$_operationMessage\n\nError: $e\n\nFiles are saved locally but not synced to FlutterFlow.';
       });
     }
   }
