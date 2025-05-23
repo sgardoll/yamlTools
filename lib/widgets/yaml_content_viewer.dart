@@ -36,6 +36,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   bool _isCopied = false;
   bool _isValidating = false;
   bool _isUpdating = false;
+  bool _hasUnsavedChanges = false; // Track unsaved changes
   String? _validationError;
   bool _isValid = true;
 
@@ -43,6 +44,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   void initState() {
     super.initState();
     _textController = TextEditingController(text: widget.content ?? '');
+    // Listen for changes to track unsaved changes
+    _textController.addListener(_onTextChanged);
   }
 
   @override
@@ -50,18 +53,35 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.content != widget.content) {
       _textController.text = widget.content ?? '';
-      // Reset validation state when content changes
+      // Reset validation state and unsaved changes when content changes externally
       setState(() {
         _validationError = null;
         _isValid = true;
+        _hasUnsavedChanges = false;
       });
     }
   }
 
   @override
   void dispose() {
+    _textController.removeListener(_onTextChanged);
     _textController.dispose();
     super.dispose();
+  }
+
+  void _onTextChanged() {
+    // Check if content has changed from the original
+    final hasChanges = _textController.text != (widget.content ?? '');
+    if (hasChanges != _hasUnsavedChanges) {
+      setState(() {
+        _hasUnsavedChanges = hasChanges;
+        // Clear validation error when user starts typing
+        if (hasChanges && _validationError != null) {
+          _validationError = null;
+          _isValid = true;
+        }
+      });
+    }
   }
 
   // Validate YAML content with the API
@@ -309,6 +329,47 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         _isUpdating = false;
       });
     }
+  }
+
+  // Save changes and exit edit mode
+  Future<void> _saveChanges() async {
+    if (!_hasUnsavedChanges) return;
+
+    final currentContent = _textController.text;
+
+    // Validate first if we have a project ID
+    if (widget.projectId.isNotEmpty) {
+      await _validateYaml(currentContent);
+      // Don't save if validation failed
+      if (!_isValid) return;
+    }
+
+    // Call the content changed callback to save locally
+    if (widget.onContentChanged != null) {
+      widget.onContentChanged!(currentContent);
+    }
+
+    // If validation passed and we have project credentials, update via API
+    if (_isValid && widget.projectId.isNotEmpty) {
+      await _updateFileViaApi(currentContent);
+    }
+
+    // Mark as saved and exit edit mode
+    setState(() {
+      _hasUnsavedChanges = false;
+      _isEditing = false;
+    });
+  }
+
+  // Discard changes and exit edit mode
+  void _discardChanges() {
+    setState(() {
+      _textController.text = widget.content ?? '';
+      _hasUnsavedChanges = false;
+      _isEditing = false;
+      _validationError = null;
+      _isValid = true;
+    });
   }
 
   @override
@@ -574,13 +635,49 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
 
                 const SizedBox(width: 8),
 
-                // Edit toggle button
+                // Save/Discard buttons when editing with unsaved changes
+                if (_isEditing && _hasUnsavedChanges) ...[
+                  _buildActionButton(
+                    icon: Icons.close,
+                    label: 'Discard',
+                    onPressed: _discardChanges,
+                    color: AppTheme.errorColor,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildActionButton(
+                    icon: _isValidating || _isUpdating
+                        ? Icons.hourglass_empty
+                        : Icons.save,
+                    label: _isValidating
+                        ? 'Validating...'
+                        : _isUpdating
+                            ? 'Saving...'
+                            : 'Save',
+                    onPressed: (_isValidating || _isUpdating)
+                        ? null
+                        : () => _saveChanges(),
+                    color: AppTheme.successColor,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+
+                // Edit toggle button (or Cancel if editing without changes)
                 _buildActionButton(
-                  icon: _isEditing ? Icons.visibility : Icons.edit,
-                  label: _isEditing ? 'View' : 'Edit',
-                  onPressed: _toggleEdit,
+                  icon: _isEditing
+                      ? (_hasUnsavedChanges ? Icons.edit : Icons.visibility)
+                      : Icons.edit,
+                  label: _isEditing
+                      ? (_hasUnsavedChanges ? 'Editing' : 'View')
+                      : 'Edit',
+                  onPressed: _isEditing && !_hasUnsavedChanges
+                      ? _toggleEdit
+                      : _isEditing && _hasUnsavedChanges
+                          ? null // Disable when editing with unsaved changes
+                          : _toggleEdit,
                   color: _isEditing
-                      ? AppTheme.primaryColor
+                      ? (_hasUnsavedChanges
+                          ? AppTheme.warningColor
+                          : AppTheme.primaryColor)
                       : AppTheme.textSecondary,
                 ),
               ],
@@ -594,9 +691,12 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   Widget _buildActionButton({
     required IconData icon,
     required String label,
-    required VoidCallback onPressed,
+    required VoidCallback? onPressed,
     required Color color,
   }) {
+    final isDisabled = onPressed == null;
+    final effectiveColor = isDisabled ? color.withOpacity(0.4) : color;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -606,17 +706,19 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: color.withOpacity(0.3), width: 1),
+            border:
+                Border.all(color: effectiveColor.withOpacity(0.3), width: 1),
+            color: isDisabled ? AppTheme.surfaceColor.withOpacity(0.5) : null,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: color),
+              Icon(icon, size: 14, color: effectiveColor),
               const SizedBox(width: 4),
               Text(
                 label,
                 style: AppTheme.captionLarge.copyWith(
-                  color: color,
+                  color: effectiveColor,
                   fontWeight: FontWeight.w600,
                 ),
               ),
