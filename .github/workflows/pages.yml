@@ -78,9 +78,16 @@ jobs:
           flutter build web \
             --release \
             --base-href /yamlTools/ \
-            --no-tree-shake-icons \
             --web-renderer html \
-            --dart-define=FLUTTER_WEB_AUTO_DETECT=true
+            --dart-define=FLUTTER_WEB_AUTO_DETECT=true \
+            --source-maps
+
+      - name: Verify build output
+        run: |
+          echo "📁 Build directory contents:"
+          ls -la build/web/
+          echo "🔍 Checking for critical files:"
+          ls -la build/web/*.js build/web/*.html || echo "Some JS/HTML files missing"
 
       - name: Optimize build for GitHub Pages
         run: |
@@ -88,8 +95,10 @@ jobs:
           touch build/web/.nojekyll
           # Create 404.html for SPA routing
           cp build/web/index.html build/web/404.html
-          # Add cache headers file
-          echo "Cache-Control: public, max-age=31536000" > build/web/.htaccess
+          # Ensure proper MIME types
+          echo "*.js text/javascript" > build/web/.htaccess
+          echo "*.css text/css" >> build/web/.htaccess
+          echo "*.wasm application/wasm" >> build/web/.htaccess
 
       - name: Upload artifact to GitHub Pages
         uses: actions/upload-pages-artifact@v3
