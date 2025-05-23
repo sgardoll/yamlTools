@@ -4,7 +4,7 @@ window.createCorsProxy = function () {
   console.log("Setting up CORS proxy for Flutter web");
 
   // Keep track of proxied endpoints
-  const proxiedApis = ["api.flutterflow.io"];
+  const proxiedApis = ["@api.flutterflow.io"];
 
   // Proxy setup for fetch API
   const originalFetch = window.fetch;

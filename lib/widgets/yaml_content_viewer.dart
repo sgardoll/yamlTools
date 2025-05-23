@@ -92,7 +92,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       });
 
       // For web, we're using a CORS proxy initialized in index.html
-      final apiUrl = 'https://api.flutterflow.io/v2/validateProjectYaml';
+      final apiUrl =
+          '@https://api.flutterflow.io/v2-staging/validateProjectYaml';
       print('Sending validation request to: $apiUrl');
 
       final response = await http.post(

@@ -11,7 +11,7 @@ class OpenAIClient {
   final String baseUrl;
 
   OpenAIClient(
-      {required this.apiKey, this.baseUrl = 'https://api.openai.com/v1'});
+      {required this.apiKey, this.baseUrl = '@https://api.openai.com/v1'});
 
   Future<Map<String, dynamic>> chat({
     required String model,
