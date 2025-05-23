@@ -15,33 +15,27 @@ class AppHeader extends StatelessWidget {
     this.onAIAssist,
   }) : super(key: key);
 
-  // Consistent button style for all buttons
-  ButtonStyle _getButtonStyle({Color? backgroundColor}) {
-    return ElevatedButton.styleFrom(
-      backgroundColor: backgroundColor ?? AppTheme.surfaceColor,
-      foregroundColor: Colors.white,
-      textStyle: const TextStyle(
-        fontWeight: FontWeight.w500,
-        fontSize: 14,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
-      ),
-      elevation: 0,
-      shadowColor: Colors.transparent,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.backgroundColor,
-        border: Border(
-          bottom: BorderSide(color: AppTheme.dividerColor, width: 1),
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF4F46E5), // Indigo-600
+            Color(0xFF6366F1), // Indigo-500
+          ],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            offset: Offset(0, 2),
+            blurRadius: 4,
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -49,38 +43,47 @@ class AppHeader extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
-                  color: AppTheme.primaryColor,
+                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      offset: Offset(0, 2),
+                      blurRadius: 4,
+                    ),
+                  ],
                 ),
                 child: const Center(
                   child: Icon(
                     Icons.code,
-                    color: Colors.white,
-                    size: 18,
+                    color: Color(0xFF4F46E5),
+                    size: 20,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 16),
               RichText(
                 text: const TextSpan(
                   children: [
                     TextSpan(
                       text: 'FlutterFlow ',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
                       ),
                     ),
                     TextSpan(
                       text: 'YAML Editor AI',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primaryColor,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w400,
+                        color: Colors.white70,
+                        letterSpacing: -0.5,
                       ),
                     ),
                   ],
@@ -94,43 +97,83 @@ class AppHeader extends StatelessWidget {
           // Action Buttons
           Row(
             children: [
-              // New Project Button
-              ElevatedButton.icon(
+              // New Project Button (Primary)
+              _buildHeaderButton(
                 onPressed: onNewProject,
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('New Project'),
-                style: _getButtonStyle(backgroundColor: AppTheme.primaryColor),
+                icon: Icons.add,
+                label: 'New Project',
+                isPrimary: true,
               ),
               const SizedBox(width: 8),
 
               // Recent Button
-              ElevatedButton.icon(
+              _buildHeaderButton(
                 onPressed: onRecent,
-                icon: const Icon(Icons.history, size: 16),
-                label: const Text('Recent'),
-                style: _getButtonStyle(),
+                icon: Icons.history,
+                label: 'Recent',
+                backgroundColor: Colors.white.withOpacity(0.1),
               ),
               const SizedBox(width: 8),
 
-              // Reload Button
-              ElevatedButton.icon(
+              // Reload Button (Success Green)
+              _buildHeaderButton(
                 onPressed: onReload,
-                icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('Reload'),
-                style: _getButtonStyle(backgroundColor: AppTheme.successColor),
+                icon: Icons.refresh,
+                label: 'Reload',
+                backgroundColor: Color(0xFF22C55E),
               ),
               const SizedBox(width: 8),
 
-              // AI Assist Button
-              ElevatedButton.icon(
+              // AI Assist Button (Orange/Pink)
+              _buildHeaderButton(
                 onPressed: onAIAssist,
-                icon: const Icon(Icons.auto_awesome, size: 16),
-                label: const Text('AI Assist'),
-                style: _getButtonStyle(backgroundColor: Colors.orange),
+                icon: Icons.auto_awesome,
+                label: 'AI Assist',
+                backgroundColor: Color(0xFFEC4899),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderButton({
+    required VoidCallback? onPressed,
+    required IconData icon,
+    required String label,
+    bool isPrimary = false,
+    Color? backgroundColor,
+  }) {
+    return Container(
+      height: 36,
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 16),
+        label: Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isPrimary
+              ? Colors.white
+              : backgroundColor ?? Colors.white.withOpacity(0.1),
+          foregroundColor: isPrimary ? Color(0xFF4F46E5) : Colors.white,
+          elevation: isPrimary ? 2 : 0,
+          shadowColor:
+              isPrimary ? Colors.black.withOpacity(0.1) : Colors.transparent,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: isPrimary
+                ? BorderSide.none
+                : BorderSide(color: Colors.white.withOpacity(0.2), width: 1),
+          ),
+          minimumSize: Size(0, 36),
+        ),
       ),
     );
   }

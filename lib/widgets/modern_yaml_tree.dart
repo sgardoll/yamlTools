@@ -261,13 +261,56 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundColor,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        children: _buildNodeChildren(_rootNode, 0),
+      decoration: AppTheme.panelDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header with title
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceColor,
+              border: Border(
+                bottom: BorderSide(color: AppTheme.dividerColor, width: 1),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.folder_outlined,
+                  size: 18,
+                  color: AppTheme.primaryColor,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Project Files',
+                  style: AppTheme.headingSmall.copyWith(fontSize: 16),
+                ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration:
+                      AppTheme.statusBadgeDecoration(AppTheme.textMuted),
+                  child: Text(
+                    '${widget.yamlFiles.length}',
+                    style: AppTheme.captionLarge.copyWith(
+                      color: AppTheme.textMuted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Tree content
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: _buildNodeChildren(_rootNode, 0),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -306,155 +349,145 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     IconData icon = _getNodeIcon(node.type);
     Color iconColor = _getNodeColor(node.type);
 
-    return InkWell(
-      onTap: () {
-        setState(() {
-          if (hasChildren) {
-            if (isExpanded) {
-              _expandedNodes.remove(nodeIdentifier);
-            } else {
-              _expandedNodes.add(nodeIdentifier);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            if (hasChildren) {
+              if (isExpanded) {
+                _expandedNodes.remove(nodeIdentifier);
+              } else {
+                _expandedNodes.add(nodeIdentifier);
+              }
             }
-          }
 
-          if (node.filePath != null) {
-            _selectedFilePath = node.filePath;
-            if (widget.onFileSelected != null) {
-              widget.onFileSelected!(node.filePath!);
+            if (node.filePath != null) {
+              _selectedFilePath = node.filePath;
+              if (widget.onFileSelected != null) {
+                widget.onFileSelected!(node.filePath!);
+              }
             }
-          }
-        });
-      },
-      child: Container(
-        padding: EdgeInsets.only(
-          left: 16.0 + (depth * 20.0),
-          right: 16.0,
-          top: 8.0,
-          bottom: 8.0,
-        ),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppTheme.primaryColor.withOpacity(0.2)
-              : (hasChildren
-                  ? AppTheme.surfaceColor.withOpacity(0.3)
-                  : Colors.transparent),
-          border: isSelected
-              ? Border(
-                  left: BorderSide(
-                    color: AppTheme.primaryColor,
-                    width: 3,
-                  ),
-                )
-              : null,
-        ),
-        child: Row(
-          children: [
-            // Show different icon based on expansion state and whether node has children
-            Container(
-              width: 20,
-              height: 20,
-              decoration: hasChildren
-                  ? BoxDecoration(
-                      color: AppTheme.dividerColor.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(4),
-                    )
-                  : null,
-              child: Center(
-                child: Icon(
-                  hasChildren
-                      ? (isExpanded
-                          ? Icons.keyboard_arrow_down
-                          : Icons.keyboard_arrow_right)
-                      : Icons.circle,
-                  size: hasChildren ? 16 : 8,
-                  color: hasChildren
-                      ? AppTheme.textPrimary
-                      : AppTheme.dividerColor.withOpacity(0.7),
-                ),
+          });
+        },
+        hoverColor: AppTheme.primaryColor.withOpacity(0.05),
+        child: Container(
+          padding: EdgeInsets.only(
+            left: 12.0 + (depth * 16.0),
+            right: 12.0,
+            top: 6.0,
+            bottom: 6.0,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? AppTheme.primaryColor.withOpacity(0.1)
+                : Colors.transparent,
+            border: isSelected
+                ? Border(
+                    left: BorderSide(
+                      color: AppTheme.primaryColor,
+                      width: 3,
+                    ),
+                  )
+                : null,
+          ),
+          child: Row(
+            children: [
+              // Expansion indicator for folders
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: hasChildren
+                    ? Icon(
+                        isExpanded
+                            ? Icons.keyboard_arrow_down_rounded
+                            : Icons.keyboard_arrow_right_rounded,
+                        size: 16,
+                        color: AppTheme.textSecondary,
+                      )
+                    : null,
               ),
-            ),
-            const SizedBox(width: 8),
-            Icon(
-              icon,
-              size: 16,
-              color: iconColor,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      node.name,
-                      style: TextStyle(
-                        color: isSelected
-                            ? AppTheme.primaryColor
-                            : AppTheme.textPrimary,
-                        fontWeight: isSelected || hasChildren
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  // Show validation indicator for validated files
-                  if (isValidated) ...[
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4.0),
-                      child: Tooltip(
-                        message: 'Recently validated and saved',
-                        child: Icon(
-                          Icons.check_circle,
-                          size: 14,
-                          color: Colors.green[700],
+              const SizedBox(width: 8),
+
+              // Node icon
+              Icon(
+                icon,
+                size: 16,
+                color: isSelected ? AppTheme.primaryColor : iconColor,
+              ),
+              const SizedBox(width: 8),
+
+              // Node name and status
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        node.name,
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: isSelected
+                              ? AppTheme.primaryColor
+                              : AppTheme.textPrimary,
+                          fontWeight: isSelected || hasChildren
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          fontSize: 13,
                         ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4.0),
-                      child: Container(
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.green[100],
-                          borderRadius: BorderRadius.circular(6),
-                          border:
-                              Border.all(color: Colors.green[300]!, width: 1),
+
+                    // Status indicators
+                    if (isValidated) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration:
+                            AppTheme.statusBadgeDecoration(AppTheme.validColor),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.check_circle_outline,
+                              size: 10,
+                              color: AppTheme.validColor,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              'Valid',
+                              style: AppTheme.captionSmall.copyWith(
+                                color: AppTheme.validColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
+                      ),
+                    ],
+
+                    // Child count badge for folders
+                    if (hasChildren) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration:
+                            AppTheme.statusBadgeDecoration(AppTheme.textMuted),
                         child: Text(
-                          'Valid',
-                          style: TextStyle(
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green[800],
+                          '${node.children.length}',
+                          style: AppTheme.captionSmall.copyWith(
+                            color: AppTheme.textMuted,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
-                  // Add badge to show child count if has children
-                  if (hasChildren)
-                    Container(
-                      margin: const EdgeInsets.only(left: 4),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppTheme.dividerColor.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '${node.children.length}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

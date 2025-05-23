@@ -855,81 +855,181 @@ class _HomeScreenState extends State<HomeScreen> {
     bool hasCredentials = _projectIdController.text.isNotEmpty &&
         _apiTokenController.text.isNotEmpty;
 
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
+    return Container(
+      color: AppTheme.backgroundColor,
       child: Center(
         child: Container(
           constraints: const BoxConstraints(maxWidth: 600),
+          margin: const EdgeInsets.all(24),
           padding: const EdgeInsets.all(32),
-          decoration: BoxDecoration(
-            color: AppTheme.surfaceColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.dividerColor),
-          ),
+          decoration: AppTheme.cardDecoration,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Load FlutterFlow Project',
-                style: AppTheme.headingLarge,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-
-              // Project ID field
-              TextField(
-                controller: _projectIdController,
-                decoration: InputDecoration(
-                  labelText: 'Project ID',
-                  hintText: 'Enter your FlutterFlow project ID',
-                  prefixIcon: const Icon(Icons.folder_outlined),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+              // Header section
+              Column(
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF4F46E5), Color(0xFF3B82F6)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.primaryColor.withOpacity(0.2),
+                          offset: Offset(0, 4),
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        Icons.upload_file,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // API Token field
-              TextField(
-                controller: _apiTokenController,
-                decoration: InputDecoration(
-                  labelText: 'API Token',
-                  hintText: 'Enter your FlutterFlow API token',
-                  prefixIcon: const Icon(Icons.key),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Load FlutterFlow Project',
+                    style: AppTheme.headingLarge.copyWith(fontSize: 28),
+                    textAlign: TextAlign.center,
                   ),
-                ),
-                obscureText: true,
+                  const SizedBox(height: 8),
+                  Text(
+                    'Enter your project credentials to get started',
+                    style: AppTheme.bodyLarge.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
 
-              // Fetch YAML button
-              ElevatedButton.icon(
-                onPressed: hasCredentials ? _fetchProjectYaml : null,
-                icon: const Icon(Icons.download, size: 18),
-                label: const Text('Fetch YAML'),
-                style: AppTheme.primaryButtonStyle,
+              // Form section
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Project ID field
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Project ID',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _projectIdController,
+                        decoration: AppTheme.inputDecoration(
+                          hintText: 'Enter your FlutterFlow project ID',
+                          prefixIcon: const Icon(Icons.folder_outlined),
+                        ),
+                        style: AppTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // API Token field
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'API Token',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _apiTokenController,
+                        decoration: AppTheme.inputDecoration(
+                          hintText: 'Enter your FlutterFlow API token',
+                          prefixIcon: const Icon(Icons.key),
+                        ),
+                        style: AppTheme.bodyMedium,
+                        obscureText: true,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+
+                  // Fetch button
+                  SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: hasCredentials && !_isLoading
+                          ? _fetchProjectYaml
+                          : null,
+                      icon: _isLoading
+                          ? SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Icon(Icons.download, size: 18),
+                      label: Text(_isLoading ? 'Loading...' : 'Fetch YAML'),
+                      style: AppTheme.primaryButtonStyle.copyWith(
+                        minimumSize: MaterialStateProperty.all(
+                            Size(double.infinity, 48)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
 
-              // Recent projects section - Using only one heading
-              const Text(
-                'Recent Projects',
-                style: AppTheme.headingSmall,
-              ),
-              const SizedBox(height: 8),
-
-              // Recent projects widget - passing showHeader: false to avoid duplicate heading
-              SizedBox(
-                height: 200,
-                child: RecentProjectsWidget(
-                  onProjectSelected: _handleProjectSelected,
-                  showHeader: false, // Don't show the header in the widget
-                ),
+              // Recent projects section
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.history,
+                        size: 18,
+                        color: AppTheme.textSecondary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Recent Projects',
+                        style: AppTheme.headingSmall.copyWith(fontSize: 16),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    height: 200,
+                    decoration: BoxDecoration(
+                      color: AppTheme.backgroundColor,
+                      borderRadius: BorderRadius.circular(8),
+                      border:
+                          Border.all(color: AppTheme.dividerColor, width: 1),
+                    ),
+                    child: RecentProjectsWidget(
+                      onProjectSelected: _handleProjectSelected,
+                      showHeader: false,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

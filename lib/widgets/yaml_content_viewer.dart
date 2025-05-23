@@ -398,6 +398,9 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.surfaceColor,
+        border: Border(
+          bottom: BorderSide(color: AppTheme.dividerColor, width: 1),
+        ),
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(8),
           topRight: Radius.circular(8),
@@ -405,245 +408,221 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       ),
       child: Row(
         children: [
-          // Character count indicator
-          if (widget.characterCount != null)
-            Text(
-              '${widget.characterCount} characters',
-              style: AppTheme.bodySmall,
-            ),
-
-          const Spacer(),
-
-          // Validation status indicator
-          if (_isValidating)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.backgroundColor,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Validating',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else if (_isUpdating)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.backgroundColor,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Updating',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else if (_validationError != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.errorColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.error_outline,
-                      color: AppTheme.errorColor, size: 12),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Invalid',
-                    style: TextStyle(
-                      color: AppTheme.errorColor,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else if (_isValid &&
-              widget.content != null &&
-              widget.content!.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.successColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.check_circle_outline,
-                      color: AppTheme.successColor, size: 12),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Valid',
-                    style: TextStyle(
-                      color: AppTheme.successColor,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          const SizedBox(width: 12),
-
-          // Edit button (if not in read-only mode)
-          if (!widget.isReadOnly && !_isEditing)
-            IconButton(
-              icon: const Icon(Icons.edit,
-                  color: AppTheme.primaryColor, size: 16),
-              tooltip: 'Edit',
-              onPressed: () {
-                setState(() {
-                  _isEditing = true;
-                });
-              },
-            ),
-
-          // Save button (when editing)
-          if (_isEditing)
-            Row(
+          // File info section
+          Expanded(
+            child: Row(
               children: [
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.save, size: 16),
-                  label: const Text('Save'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.successColor,
-                    foregroundColor: Colors.white,
-                    textStyle: const TextStyle(
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14,
-                    ),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    elevation: 0,
-                    shadowColor: Colors.transparent,
-                  ),
-                  onPressed: (_isValidating || _isUpdating)
-                      ? null
-                      : () async {
-                          final newContent = _textController.text;
-
-                          // First validate the YAML
-                          await _validateYaml(newContent);
-
-                          // If validation is successful, proceed with local save and API update
-                          if (_isValid || widget.projectId.isEmpty) {
-                            // Update local content first
-                            if (widget.onContentChanged != null) {
-                              widget.onContentChanged!(newContent);
-                            }
-
-                            // If we have a project ID, automatically update via API
-                            if (widget.projectId.isNotEmpty) {
-                              await _updateFileViaApi(newContent);
-                            }
-
-                            setState(() {
-                              _isEditing = false;
-                            });
-                          }
-                        },
+                Icon(
+                  Icons.description,
+                  size: 18,
+                  color: AppTheme.primaryColor,
                 ),
-                const SizedBox(width: 12),
-                OutlinedButton(
-                  child: const Text('Cancel'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.errorColor,
-                    textStyle: const TextStyle(
-                      fontWeight: FontWeight.w500,
-                      fontSize: 14,
-                    ),
+                const SizedBox(width: 8),
+                Text(
+                  widget.filePath.isNotEmpty ? widget.filePath : 'YAML Content',
+                  style: AppTheme.headingSmall.copyWith(fontSize: 16),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(width: 8),
+                if (widget.characterCount != null)
+                  Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration:
+                        AppTheme.statusBadgeDecoration(AppTheme.textMuted),
+                    child: Text(
+                      '${widget.characterCount} chars',
+                      style: AppTheme.captionLarge.copyWith(
+                        color: AppTheme.textMuted,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                  onPressed: (_isValidating || _isUpdating)
-                      ? null
-                      : () {
-                          // Reset to original content
-                          _textController.text = widget.content ?? '';
-                          setState(() {
-                            _isEditing = false;
-                          });
-                        },
-                ),
               ],
             ),
+          ),
 
-          // Add spacing between edit buttons and copy button
-          if (_isEditing) const SizedBox(width: 16),
+          const SizedBox(width: 16),
 
-          // Copy button
-          if (!_isEditing)
-            IconButton(
-              icon: Icon(
-                _isCopied ? Icons.check : Icons.copy,
-                color:
-                    _isCopied ? AppTheme.successColor : AppTheme.primaryColor,
-                size: 16,
-              ),
-              tooltip: 'Copy to clipboard',
-              onPressed: () {
-                final content = widget.content ?? '';
-                Clipboard.setData(ClipboardData(text: content));
-                setState(() {
-                  _isCopied = true;
-                });
-                Future.delayed(const Duration(seconds: 2), () {
-                  if (mounted) {
-                    setState(() {
-                      _isCopied = false;
-                    });
-                  }
-                });
-              },
-            ),
+          // Status and action buttons
+          Row(
+            children: [
+              // Validation status indicator
+              if (_isValidating)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration:
+                      AppTheme.statusBadgeDecoration(AppTheme.infoColor),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(AppTheme.infoColor),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Validating',
+                        style: AppTheme.captionLarge.copyWith(
+                          color: AppTheme.infoColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (_isUpdating)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration:
+                      AppTheme.statusBadgeDecoration(AppTheme.updatedColor),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                              AppTheme.updatedColor),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Updating',
+                        style: AppTheme.captionLarge.copyWith(
+                          color: AppTheme.updatedColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (_validationError != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration:
+                      AppTheme.statusBadgeDecoration(AppTheme.errorColor),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: AppTheme.errorColor,
+                        size: 12,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Invalid',
+                        style: AppTheme.captionLarge.copyWith(
+                          color: AppTheme.errorColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (_isValid &&
+                  widget.content != null &&
+                  widget.content!.isNotEmpty)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration:
+                      AppTheme.statusBadgeDecoration(AppTheme.validColor),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline,
+                        color: AppTheme.validColor,
+                        size: 12,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Valid',
+                        style: AppTheme.captionLarge.copyWith(
+                          color: AppTheme.validColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Action buttons
+              if (!widget.isReadOnly && widget.content != null) ...[
+                const SizedBox(width: 12),
+
+                // Copy button
+                _buildActionButton(
+                  icon: _isCopied ? Icons.check : Icons.copy,
+                  label: _isCopied ? 'Copied' : 'Copy',
+                  onPressed: _copyToClipboard,
+                  color:
+                      _isCopied ? AppTheme.validColor : AppTheme.textSecondary,
+                ),
+
+                const SizedBox(width: 8),
+
+                // Edit toggle button
+                _buildActionButton(
+                  icon: _isEditing ? Icons.visibility : Icons.edit,
+                  label: _isEditing ? 'View' : 'Edit',
+                  onPressed: _toggleEdit,
+                  color: _isEditing
+                      ? AppTheme.primaryColor
+                      : AppTheme.textSecondary,
+                ),
+              ],
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    required Color color,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: color.withOpacity(0.3), width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: AppTheme.captionLarge.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -718,5 +697,26 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         ),
       ),
     );
+  }
+
+  void _copyToClipboard() {
+    final content = widget.content ?? '';
+    Clipboard.setData(ClipboardData(text: content));
+    setState(() {
+      _isCopied = true;
+    });
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() {
+          _isCopied = false;
+        });
+      }
+    });
+  }
+
+  void _toggleEdit() {
+    setState(() {
+      _isEditing = !_isEditing;
+    });
   }
 }
