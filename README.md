@@ -136,3 +136,4 @@ This repository is set up to deploy to GitHub Pages using GitHub Actions:
 ## License
 
 [MIT License](LICENSE)
+# Trigger deployment
