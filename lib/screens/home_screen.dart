@@ -308,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final apiUrl =
-          '@https://api.flutterflow.io/v2-staging/projectYamls?projectId=$projectId';
+          'https://api.flutterflow.io/v2-staging/projectYamls?projectId=$projectId';
       print('Fetching YAML from: $apiUrl');
 
       final response = await http.get(
