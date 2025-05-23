@@ -73,32 +73,43 @@ jobs:
       - name: Clean previous builds
         run: flutter clean
 
-      - name: Build for Web (Release)
+      - name: Build for Web (Release) - GitHub Pages Compatible
         run: |
           flutter build web \
             --release \
-            --base-href /yamlTools/ \
-            --web-renderer html \
-            --dart-define=FLUTTER_WEB_AUTO_DETECT=true \
-            --source-maps
+            --base-href "/yamlTools/" \
+            --web-renderer canvaskit \
+            --csp \
+            --no-tree-shake-icons
+
+      - name: Fix GitHub Pages deployment issues
+        run: |
+          cd build/web
+
+          # Create .nojekyll to bypass Jekyll processing
+          touch .nojekyll
+
+          # Create 404.html for SPA routing
+          cp index.html 404.html
+
+          # Fix base href in index.html to ensure proper loading
+          sed -i 's|<base href="/yamlTools/">|<base href="/yamlTools/">|g' index.html
+
+          # Verify critical files exist
+          echo "🔍 Verifying build files:"
+          ls -la main.dart.js flutter.js canvaskit/ || echo "Some files missing"
+
+          # Check if index.html is valid
+          echo "📄 Index.html first few lines:"
+          head -20 index.html
 
       - name: Verify build output
         run: |
           echo "📁 Build directory contents:"
           ls -la build/web/
-          echo "🔍 Checking for critical files:"
-          ls -la build/web/*.js build/web/*.html || echo "Some JS/HTML files missing"
-
-      - name: Optimize build for GitHub Pages
-        run: |
-          # Create .nojekyll to bypass Jekyll processing
-          touch build/web/.nojekyll
-          # Create 404.html for SPA routing
-          cp build/web/index.html build/web/404.html
-          # Ensure proper MIME types
-          echo "*.js text/javascript" > build/web/.htaccess
-          echo "*.css text/css" >> build/web/.htaccess
-          echo "*.wasm application/wasm" >> build/web/.htaccess
+          echo "📂 Assets and icons:"
+          ls -la build/web/assets/ || echo "No assets directory"
+          ls -la build/web/icons/ || echo "No icons directory"
 
       - name: Upload artifact to GitHub Pages
         uses: actions/upload-pages-artifact@v3
