@@ -486,115 +486,203 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
   void _confirmFileUpdate(String yamlContent, String fileName) {
     final existingContent = widget.currentFiles[fileName] ?? '';
 
+    // Create a controller for the AI-generated content so it can be edited
+    final TextEditingController aiContentController =
+        TextEditingController(text: yamlContent);
+
     // Debug output to ensure content is available
     print('DEBUG: Confirming update for $fileName');
     print('DEBUG: Existing content length: ${existingContent.length}');
     print('DEBUG: New content length: ${yamlContent.length}');
-    print(
-        'DEBUG: New content preview: ${yamlContent.length > 100 ? yamlContent.substring(0, 100) + "..." : yamlContent}');
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Confirm Update to $fileName'),
-        content: Container(
-          width: double.maxFinite,
-          height: 500, // Increased height
-          child: Column(
-            children: [
-              Text(
-                'This will replace the existing file with the AI-generated content.',
-                style: TextStyle(fontSize: 14),
-              ),
-              SizedBox(height: 16),
-              Expanded(
-                child: DefaultTabController(
-                  length: 2,
-                  child: Column(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Confirm Update to $fileName'),
+          content: Container(
+            width: double.maxFinite,
+            height: 700, // Increased height for better UX
+            child: Column(
+              children: [
+                // Header with clear explanation
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  ),
+                  child: Row(
                     children: [
-                      TabBar(
-                        tabs: [
-                          Tab(text: 'Current'),
-                          Tab(text: 'New Version'),
-                        ],
-                        labelColor: Colors.blue,
-                        unselectedLabelColor: Colors.grey,
-                      ),
+                      Icon(Icons.info_outline,
+                          color: Colors.blue[700], size: 20),
+                      SizedBox(width: 12),
                       Expanded(
-                        child: TabBarView(
-                          children: [
-                            // Current file content
-                            _buildContentTab(
-                              content: existingContent,
-                              label: 'Current content',
-                            ),
-                            // New content (AI-generated)
-                            _buildContentTab(
-                              content: yamlContent,
-                              label: 'AI-generated content',
-                              isNewContent: true,
-                            ),
-                          ],
+                        child: Text(
+                          'Review the AI-generated changes below. You can edit the new version before applying it.',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.blue[800],
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              // Update the existing file
-              await widget.onUpdateYaml(yamlContent, existingFile: fileName);
-              Navigator.pop(context);
-            },
-            child: Text('Update File'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
+
+                SizedBox(height: 16),
+
+                // Tab bar for switching between diff and edit modes
+                DefaultTabController(
+                  length: 2,
+                  child: Expanded(
+                    child: Column(
+                      children: [
+                        TabBar(
+                          tabs: [
+                            Tab(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.compare_arrows, size: 16),
+                                  SizedBox(width: 8),
+                                  Text('View Changes'),
+                                ],
+                              ),
+                            ),
+                            Tab(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.edit, size: 16),
+                                  SizedBox(width: 8),
+                                  Text('Edit AI Version'),
+                                ],
+                              ),
+                            ),
+                          ],
+                          labelColor: Colors.blue[700],
+                          unselectedLabelColor: Colors.grey[600],
+                          indicatorColor: Colors.blue[700],
+                        ),
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              // Diff view tab
+                              _buildDiffView(existingContent,
+                                  aiContentController.text, fileName),
+
+                              // Edit tab
+                              _buildEditView(
+                                  aiContentController, setDialogState),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () {
+                aiContentController.dispose();
+                Navigator.pop(context);
+              },
+              child: Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: Icon(Icons.update, size: 16),
+              label: Text('Apply Changes'),
+              onPressed: () async {
+                final finalContent = aiContentController.text;
+                aiContentController.dispose();
+                Navigator.pop(context);
+
+                // Show a loading indicator
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        ),
+                        SizedBox(width: 12),
+                        Text('Applying changes to $fileName...'),
+                      ],
+                    ),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+
+                // Update the existing file with the possibly edited content
+                await widget.onUpdateYaml(finalContent, existingFile: fileName);
+
+                // Show success message with clear guidance
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.white, size: 16),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            '✅ $fileName updated! The file is now ready to Save to FlutterFlow.',
+                          ),
+                        ),
+                      ],
+                    ),
+                    backgroundColor: Colors.green[600],
+                    duration: Duration(seconds: 4),
+                    action: SnackBarAction(
+                      label: 'View File',
+                      textColor: Colors.white,
+                      onPressed: () {
+                        // File should already be selected by the update process
+                      },
+                    ),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green[600],
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // Helper method to build content tabs with better styling
-  Widget _buildContentTab({
-    required String content,
-    required String label,
-    bool isNewContent = false,
-  }) {
+  // Build a diff view similar to the existing DiffViewWidget
+  Widget _buildDiffView(
+      String originalContent, String newContent, String fileName) {
     return Container(
-      margin: EdgeInsets.all(8),
+      margin: EdgeInsets.only(top: 8),
       decoration: BoxDecoration(
-        color: isNewContent
-            ? Colors.green.withOpacity(0.05)
-            : Colors.blue.withOpacity(0.05),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isNewContent
-              ? Colors.green.withOpacity(0.3)
-              : Colors.blue.withOpacity(0.3),
-          width: 1,
-        ),
+        border: Border.all(color: Colors.grey[300]!),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Content header
+          // Header
           Container(
-            padding: EdgeInsets.all(8),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: isNewContent
-                  ? Colors.green.withOpacity(0.1)
-                  : Colors.blue.withOpacity(0.1),
+              color: Colors.grey[100],
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(8),
                 topRight: Radius.circular(8),
@@ -602,55 +690,187 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
             ),
             child: Row(
               children: [
-                Icon(
-                  isNewContent ? Icons.auto_awesome : Icons.description,
-                  size: 16,
-                  color: isNewContent ? Colors.green : Colors.blue,
-                ),
+                Icon(Icons.compare_arrows, size: 16, color: Colors.grey[700]),
                 SizedBox(width: 8),
                 Text(
-                  label,
+                  'Changes in $fileName',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: isNewContent ? Colors.green[800] : Colors.blue[800],
-                    fontSize: 12,
+                    color: Colors.grey[800],
+                    fontSize: 14,
                   ),
                 ),
                 Spacer(),
                 Text(
-                  '${content.length} chars',
+                  '${originalContent.length} → ${newContent.length} chars',
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 12,
                     color: Colors.grey[600],
                   ),
                 ),
               ],
             ),
           ),
-          // Content area
+
+          // Diff content
           Expanded(
-            child: content.isEmpty
-                ? Center(
-                    child: Text(
-                      'No content available',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  )
-                : SingleChildScrollView(
-                    padding: EdgeInsets.all(12),
-                    child: SelectableText(
-                      content,
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: Colors.black87,
-                        height: 1.4,
-                      ),
-                    ),
+            child: _buildSimpleDiff(originalContent, newContent),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Build edit view for the AI-generated content
+  Widget _buildEditView(
+      TextEditingController controller, StateSetter setDialogState) {
+    return Container(
+      margin: EdgeInsets.only(top: 8),
+      decoration: BoxDecoration(
+        color: Colors.green.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.green.withOpacity(0.1),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(8),
+                topRight: Radius.circular(8),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.edit, size: 16, color: Colors.green[700]),
+                SizedBox(width: 8),
+                Text(
+                  'Edit AI-Generated Content',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[800],
+                    fontSize: 14,
                   ),
+                ),
+                Spacer(),
+                Text(
+                  '${controller.text.length} chars',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Editable content
+          Expanded(
+            child: Container(
+              padding: EdgeInsets.all(12),
+              child: TextField(
+                controller: controller,
+                maxLines: null,
+                expands: true,
+                decoration: InputDecoration(
+                  border: InputBorder.none,
+                  hintText: 'Edit the AI-generated YAML content here...',
+                  hintStyle: TextStyle(color: Colors.grey[400]),
+                ),
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: Colors.black87,
+                  height: 1.4,
+                ),
+                onChanged: (value) {
+                  setDialogState(() {
+                    // This will update the character count
+                  });
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Simple diff implementation with line-by-line comparison
+  Widget _buildSimpleDiff(String original, String modified) {
+    final originalLines = original.split('\n');
+    final modifiedLines = modified.split('\n');
+
+    // Simple line-by-line comparison
+    List<Widget> diffLines = [];
+    int maxLines = originalLines.length > modifiedLines.length
+        ? originalLines.length
+        : modifiedLines.length;
+
+    for (int i = 0; i < maxLines; i++) {
+      String? originalLine = i < originalLines.length ? originalLines[i] : null;
+      String? modifiedLine = i < modifiedLines.length ? modifiedLines[i] : null;
+
+      if (originalLine == modifiedLine) {
+        // Unchanged line
+        if (originalLine != null) {
+          diffLines.add(_buildDiffLine(
+              originalLine, Colors.grey[100], Colors.black87, '  '));
+        }
+      } else {
+        // Changed lines
+        if (originalLine != null) {
+          diffLines.add(_buildDiffLine(
+              originalLine, Colors.red[50], Colors.red[800], '- '));
+        }
+        if (modifiedLine != null) {
+          diffLines.add(_buildDiffLine(
+              modifiedLine, Colors.green[50], Colors.green[800], '+ '));
+        }
+      }
+    }
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: diffLines,
+      ),
+    );
+  }
+
+  // Build a single diff line with proper styling
+  Widget _buildDiffLine(
+      String line, Color? backgroundColor, Color? textColor, String prefix) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      color: backgroundColor,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            prefix,
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              color: textColor,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              line,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                color: textColor,
+                height: 1.3,
+              ),
+            ),
           ),
         ],
       ),
