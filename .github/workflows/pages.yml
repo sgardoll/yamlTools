@@ -85,10 +85,10 @@ jobs:
         run: |
           # For newer Flutter versions, we need to ensure flutter_bootstrap.js exists
           if [ ! -f "web/flutter_bootstrap.js" ]; then
-            echo "Creating flutter_bootstrap.js for compatibility..."
+            echo "Creating modern flutter_bootstrap.js for compatibility..."
             cat > web/flutter_bootstrap.js << 'EOF'
           (() => {
-            const serviceWorkerVersion = null;
+            // Modern Flutter initialization pattern
             const RESOURCES = {};
             
             // Flutter service worker registration
@@ -98,12 +98,31 @@ jobs:
               });
             }
             
-            // Initialize the Flutter app
-            _flutter.loader.loadEntrypoint({
-              serviceWorker: {
-                serviceWorkerVersion: serviceWorkerVersion,
-              }
-            });
+            // Initialize the Flutter app using modern API
+            if (typeof _flutter !== 'undefined' && _flutter.loader) {
+              _flutter.loader.load({
+                serviceWorkerSettings: {
+                  serviceWorkerVersion: '{{flutter_service_worker_version}}',
+                },
+                onEntrypointLoaded: function (engineInitializer) {
+                  engineInitializer.initializeEngine().then(function (appRunner) {
+                    appRunner.runApp();
+                  });
+                },
+              });
+            } else {
+              // Fallback for older Flutter versions or if _flutter is not available
+              window.addEventListener('load', function (ev) {
+                console.warn('Flutter loader not found, attempting fallback initialization');
+                if (typeof _flutter !== 'undefined' && _flutter.loader) {
+                  _flutter.loader.load({
+                    serviceWorkerSettings: {
+                      serviceWorkerVersion: '{{flutter_service_worker_version}}',
+                    },
+                  });
+                }
+              });
+            }
           })();
           EOF
           fi
