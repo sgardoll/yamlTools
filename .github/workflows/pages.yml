@@ -42,7 +42,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.24.3" # Updated to latest stable that supports flutter_bootstrap.js
+          flutter-version: "3.24.3" # Latest stable version
           channel: "stable"
           cache: true # Enable caching for faster builds
 
@@ -81,59 +81,13 @@ jobs:
       - name: Clean previous builds
         run: flutter clean
 
-      - name: Create flutter_bootstrap.js if missing
-        run: |
-          # For newer Flutter versions, we need to ensure flutter_bootstrap.js exists
-          if [ ! -f "web/flutter_bootstrap.js" ]; then
-            echo "Creating modern flutter_bootstrap.js for compatibility..."
-            cat > web/flutter_bootstrap.js << 'EOF'
-          (() => {
-            // Modern Flutter initialization pattern
-            const RESOURCES = {};
-            
-            // Flutter service worker registration
-            if ('serviceWorker' in navigator) {
-              window.addEventListener('flutter-first-frame', function () {
-                navigator.serviceWorker.register('flutter_service_worker.js');
-              });
-            }
-            
-            // Initialize the Flutter app using modern API
-            if (typeof _flutter !== 'undefined' && _flutter.loader) {
-              _flutter.loader.load({
-                serviceWorkerSettings: {
-                  serviceWorkerVersion: null,
-                },
-                onEntrypointLoaded: function (engineInitializer) {
-                  engineInitializer.initializeEngine().then(function (appRunner) {
-                    appRunner.runApp();
-                  });
-                },
-              });
-            } else {
-              // Fallback for older Flutter versions or if _flutter is not available
-              window.addEventListener('load', function (ev) {
-                console.warn('Flutter loader not found, attempting fallback initialization');
-                if (typeof _flutter !== 'undefined' && _flutter.loader) {
-                  _flutter.loader.load({
-                    serviceWorkerSettings: {
-                      serviceWorkerVersion: null,
-                    },
-                  });
-                }
-              });
-            }
-          })();
-          EOF
-          fi
-
       - name: Build for Web (Release) - GitHub Pages Compatible
         run: |
           flutter build web \
             --release \
             --base-href "/yamlTools/" \
             --web-renderer canvaskit \
-            --pwa-strategy=offline-first
+            --source-maps
 
       - name: Fix GitHub Pages deployment issues
         run: |
@@ -145,48 +99,63 @@ jobs:
           # Create 404.html for SPA routing
           cp index.html 404.html
 
-          # Check if flutter_bootstrap.js was generated, if not copy from web directory
-          if [ ! -f "flutter_bootstrap.js" ] && [ -f "../../web/flutter_bootstrap.js" ]; then
-            echo "Copying flutter_bootstrap.js from web directory..."
-            cp ../../web/flutter_bootstrap.js .
+          # Modify the generated flutter_bootstrap.js to include loading screen handling
+          if [ -f "flutter_bootstrap.js" ]; then
+            echo "🔧 Adding loading screen functionality to flutter_bootstrap.js..."
+            
+            # Check if the file already has onEntrypointLoaded callback
+            if ! grep -q "onEntrypointLoaded" flutter_bootstrap.js; then
+              # Replace the simple load call with one that includes the callback
+              sed -i 's/_flutter\.loader\.load({/_flutter.loader.load({\n  onEntrypointLoaded: function(engineInitializer) {\n    engineInitializer.initializeEngine().then(function(appRunner) {\n      const loadingElement = document.getElementById("loading");\n      if (loadingElement) {\n        loadingElement.style.display = "none";\n      }\n      return appRunner.runApp();\n    });\n  },/' flutter_bootstrap.js
+            fi
           fi
 
-          # Verify that flutter.js is loaded before flutter_bootstrap.js in index.html
-          echo "🔍 Checking script loading order in index.html:"
+          # Verify that all critical Flutter files were generated
+          echo "🔍 Verifying build files:"
+          ls -la main.dart.js flutter.js flutter_bootstrap.js || echo "Some JS files missing"
+
+          # Check if flutter.js exists
+          if [ ! -f "flutter.js" ]; then
+            echo "❌ flutter.js missing - this is a critical error!"
+            echo "Available files:"
+            ls -la
+            exit 1
+          fi
+
+          # Verify script loading order in index.html
+          echo "🔍 Checking index.html script order:"
           grep -n "flutter" index.html || echo "No flutter scripts found"
 
-          # Make sure flutter.js is included and loaded first
-          if ! grep -q "flutter.js" index.html; then
-            echo "⚠️  flutter.js not found in index.html, adding it..."
-            # Add flutter.js before flutter_bootstrap.js
-            sed -i 's|<script src="flutter_bootstrap.js" async></script>|<script src="flutter.js" defer></script>\n  <script src="flutter_bootstrap.js" defer></script>|' index.html
+          # Ensure proper script order (flutter.js before flutter_bootstrap.js)
+          if ! grep -q "flutter.js.*defer" index.html; then
+            echo "⚠️  Fixing script loading order in index.html..."
+            # Fix script loading by ensuring proper order and defer attributes
+            if grep -q "flutter_bootstrap.js" index.html; then
+              # Remove existing flutter_bootstrap.js line
+              sed -i '/flutter_bootstrap.js/d' index.html
+              # Add both scripts with proper order and defer attributes before </body>
+              sed -i 's|</body>|  <script src="flutter.js" defer></script>\n  <script src="flutter_bootstrap.js" defer></script>\n</body>|' index.html
+            fi
           fi
 
           # Verify critical files exist
-          echo "🔍 Verifying build files:"
-          ls -la main.dart.js flutter.js || echo "Some JS files missing"
-          ls -la flutter_bootstrap.js || echo "❌ flutter_bootstrap.js still missing"
-          ls -la canvaskit/ || echo "Canvaskit directory missing"
+          echo "📄 Final verification of critical files:"
+          test -f main.dart.js && echo "✅ main.dart.js exists" || echo "❌ main.dart.js missing"
+          test -f flutter.js && echo "✅ flutter.js exists" || echo "❌ flutter.js missing"
+          test -f flutter_bootstrap.js && echo "✅ flutter_bootstrap.js exists" || echo "❌ flutter_bootstrap.js missing"
+          test -d canvaskit && echo "✅ canvaskit directory exists" || echo "❌ canvaskit directory missing"
 
-          # Check if index.html is valid and show its content
-          echo "📄 Index.html content:"
+          # Display final flutter_bootstrap.js content for debugging
+          echo "📄 Final flutter_bootstrap.js content:"
+          cat flutter_bootstrap.js
+
+          # Display final index.html for debugging
+          echo "📄 Final index.html content:"
           cat index.html
 
           # Verify the base href was set correctly
           echo "🔍 Checking base href:"
           grep -n "base href" index.html || echo "Base href not found"
-
-      - name: Verify build output
-        run: |
-          echo "📁 Build directory contents:"
-          ls -la build/web/
-          echo "📂 Assets and icons:"
-          ls -la build/web/assets/ || echo "No assets directory"
-          ls -la build/web/icons/ || echo "No icons directory"
-          echo "📄 Critical files check:"
-          test -f build/web/main.dart.js && echo "✅ main.dart.js exists" || echo "❌ main.dart.js missing"
-          test -f build/web/flutter.js && echo "✅ flutter.js exists" || echo "❌ flutter.js missing"
-          test -f build/web/flutter_bootstrap.js && echo "✅ flutter_bootstrap.js exists" || echo "❌ flutter_bootstrap.js missing"
 
       - name: Upload artifact to GitHub Pages
         uses: actions/upload-pages-artifact@v3
