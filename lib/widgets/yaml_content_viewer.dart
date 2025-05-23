@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../theme/app_theme.dart';
+import '../storage/preferences_manager.dart';
 
 class YamlContentViewer extends StatefulWidget {
   final String? content;
@@ -72,6 +73,16 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     });
 
     try {
+      // Get the API token from storage
+      final apiToken = await PreferencesManager.getApiKey();
+      if (apiToken == null || apiToken.isEmpty) {
+        setState(() {
+          _isValid = false;
+          _validationError = 'API token not found. Please set your API token.';
+        });
+        return;
+      }
+
       // Extract file key from the file path
       String fileKey = widget.filePath;
       if (fileKey.contains('/')) {
@@ -92,12 +103,14 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       });
 
       // For web, we're using a CORS proxy initialized in index.html
-      final apiUrl = 'https://api.flutterflow.io/v2/validateProjectYaml';
+      final apiUrl =
+          'https://api.flutterflow.io/v2-staging/validateProjectYaml';
       print('Sending validation request to: $apiUrl');
 
       final response = await http.post(
         Uri.parse(apiUrl),
         headers: {
+          'Authorization': 'Bearer $apiToken',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           // Add cache control to prevent caching issues
