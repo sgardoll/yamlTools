@@ -15,6 +15,24 @@ class AppHeader extends StatelessWidget {
     this.onAIAssist,
   }) : super(key: key);
 
+  // Consistent button style for all buttons
+  ButtonStyle _getButtonStyle({Color? backgroundColor}) {
+    return ElevatedButton.styleFrom(
+      backgroundColor: backgroundColor ?? AppTheme.surfaceColor,
+      foregroundColor: Colors.white,
+      textStyle: const TextStyle(
+        fontWeight: FontWeight.w500,
+        fontSize: 14,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+      ),
+      elevation: 0,
+      shadowColor: Colors.transparent,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -31,16 +49,17 @@ class AppHeader extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  color: AppTheme.primaryColor,
                 ),
                 child: const Center(
                   child: Icon(
                     Icons.code,
-                    color: AppTheme.primaryColor,
+                    color: Colors.white,
+                    size: 18,
                   ),
                 ),
               ),
@@ -51,16 +70,16 @@ class AppHeader extends StatelessWidget {
                     TextSpan(
                       text: 'FlutterFlow ',
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary,
                       ),
                     ),
                     TextSpan(
                       text: 'YAML Editor AI',
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
                         color: AppTheme.primaryColor,
                       ),
                     ),
@@ -78,68 +97,36 @@ class AppHeader extends StatelessWidget {
               // New Project Button
               ElevatedButton.icon(
                 onPressed: onNewProject,
-                icon: const Icon(Icons.add, size: 18),
+                icon: const Icon(Icons.add, size: 16),
                 label: const Text('New Project'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryColor,
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
+                style: _getButtonStyle(backgroundColor: AppTheme.primaryColor),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
 
               // Recent Button
               ElevatedButton.icon(
                 onPressed: onRecent,
-                icon: const Icon(Icons.history, size: 18),
+                icon: const Icon(Icons.history, size: 16),
                 label: const Text('Recent'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.surfaceColor,
-                  foregroundColor: AppTheme.textPrimary,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
+                style: _getButtonStyle(),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
 
               // Reload Button
               ElevatedButton.icon(
                 onPressed: onReload,
-                icon: const Icon(Icons.refresh, size: 18),
+                icon: const Icon(Icons.refresh, size: 16),
                 label: const Text('Reload'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
+                style: _getButtonStyle(backgroundColor: AppTheme.successColor),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
 
               // AI Assist Button
               ElevatedButton.icon(
                 onPressed: onAIAssist,
-                icon: const Icon(Icons.smart_toy, size: 18),
+                icon: const Icon(Icons.auto_awesome, size: 16),
                 label: const Text('AI Assist'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.secondaryColor,
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
+                style: _getButtonStyle(backgroundColor: Colors.orange),
               ),
             ],
           ),

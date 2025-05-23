@@ -4,12 +4,14 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../storage/preferences_manager.dart';
+import '../services/flutterflow_api_service.dart';
 
 class YamlContentViewer extends StatefulWidget {
   final String? content;
   final int? characterCount;
   final bool isReadOnly;
   final Function(String)? onContentChanged;
+  final Function(String)? onFileUpdated;
   final String filePath;
   final String projectId;
 
@@ -19,6 +21,7 @@ class YamlContentViewer extends StatefulWidget {
     this.characterCount,
     this.isReadOnly = true,
     this.onContentChanged,
+    this.onFileUpdated,
     this.filePath = '',
     this.projectId = '',
   }) : super(key: key);
@@ -32,6 +35,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   bool _isEditing = false;
   bool _isCopied = false;
   bool _isValidating = false;
+  bool _isUpdating = false;
   String? _validationError;
   bool _isValid = true;
 
@@ -156,6 +160,55 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     }
   }
 
+  // Update file via FlutterFlow API after successful validation
+  Future<void> _updateFileViaApi(String content) async {
+    // Skip update if project ID is empty
+    if (widget.projectId.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _isUpdating = true;
+    });
+
+    try {
+      // Get the API token from storage
+      final apiToken = await PreferencesManager.getApiKey();
+      if (apiToken == null || apiToken.isEmpty) {
+        print('API token not found for update');
+        return;
+      }
+
+      // Convert the file path to the format expected by the API
+      final fileKey = FlutterFlowApiService.getFileKey(widget.filePath);
+      final fileKeyToContent = {fileKey: content};
+
+      print('Updating file via API: ${widget.filePath} (key: $fileKey)');
+
+      // Call the FlutterFlow API
+      await FlutterFlowApiService.updateProjectYaml(
+        projectId: widget.projectId,
+        apiToken: apiToken,
+        fileKeyToContent: fileKeyToContent,
+      );
+
+      print('Successfully updated file via API: ${widget.filePath}');
+
+      // Notify that the file was updated via API
+      if (widget.onFileUpdated != null) {
+        widget.onFileUpdated!(widget.filePath);
+      }
+    } catch (e) {
+      print('Error updating file via API: $e');
+      // We don't show UI errors here since this is automatic,
+      // the parent can handle error display through other means
+    } finally {
+      setState(() {
+        _isUpdating = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -259,6 +312,36 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                 ],
               ),
             )
+          else if (_isUpdating)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundColor,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Updating',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            )
           else if (_validationError != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -313,7 +396,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           // Edit button (if not in read-only mode)
           if (!widget.isReadOnly && !_isEditing)
             IconButton(
-              icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
+              icon: const Icon(Icons.edit,
+                  color: AppTheme.primaryColor, size: 16),
               tooltip: 'Edit',
               onPressed: () {
                 setState(() {
@@ -332,37 +416,68 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.successColor,
                     foregroundColor: Colors.white,
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    elevation: 0,
+                    shadowColor: Colors.transparent,
                   ),
-                  onPressed: () async {
-                    final newContent = _textController.text;
+                  onPressed: (_isValidating || _isUpdating)
+                      ? null
+                      : () async {
+                          final newContent = _textController.text;
 
-                    // First validate the YAML
-                    await _validateYaml(newContent);
+                          // First validate the YAML
+                          await _validateYaml(newContent);
 
-                    // Only save if valid or if we have no project ID to validate against
-                    if (_isValid || widget.projectId.isEmpty) {
-                      if (widget.onContentChanged != null) {
-                        widget.onContentChanged!(newContent);
-                      }
-                      setState(() {
-                        _isEditing = false;
-                      });
-                    }
-                  },
+                          // If validation is successful, proceed with local save and API update
+                          if (_isValid || widget.projectId.isEmpty) {
+                            // Update local content first
+                            if (widget.onContentChanged != null) {
+                              widget.onContentChanged!(newContent);
+                            }
+
+                            // If we have a project ID, automatically update via API
+                            if (widget.projectId.isNotEmpty) {
+                              await _updateFileViaApi(newContent);
+                            }
+
+                            setState(() {
+                              _isEditing = false;
+                            });
+                          }
+                        },
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton(
                   child: const Text('Cancel'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.errorColor,
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
                   ),
-                  onPressed: () {
-                    // Reset to original content
-                    _textController.text = widget.content ?? '';
-                    setState(() {
-                      _isEditing = false;
-                    });
-                  },
+                  onPressed: (_isValidating || _isUpdating)
+                      ? null
+                      : () {
+                          // Reset to original content
+                          _textController.text = widget.content ?? '';
+                          setState(() {
+                            _isEditing = false;
+                          });
+                        },
                 ),
               ],
             ),
@@ -374,6 +489,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                 _isCopied ? Icons.check : Icons.copy,
                 color:
                     _isCopied ? AppTheme.successColor : AppTheme.primaryColor,
+                size: 16,
               ),
               tooltip: 'Copy to clipboard',
               onPressed: () {

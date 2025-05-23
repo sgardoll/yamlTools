@@ -280,66 +280,8 @@ class _HomeScreenState extends State<HomeScreen> {
             '$_operationMessage\n\nThe file has been updated.';
       });
 
-      // After successful save, call FlutterFlow API to update the project
-      await _updateFlutterFlowProject(fileName, newContent);
-    }
-  }
-
-  // Update the FlutterFlow project with the changed file
-  Future<void> _updateFlutterFlowProject(
-      String fileName, String content) async {
-    final projectId = _projectIdController.text;
-    final apiToken = _apiTokenController.text;
-
-    // Skip API call if we don't have project credentials
-    if (projectId.isEmpty || apiToken.isEmpty) {
-      print('Skipping FlutterFlow API call - missing project ID or API token');
-      return;
-    }
-
-    try {
-      // Test file key conversion for debugging
-      print('Testing file key conversion logic:');
-      FlutterFlowApiService.testFileKeyConversion();
-
-      // Convert the single file to the format expected by the API
-      final fileKey = FlutterFlowApiService.getFileKey(fileName);
-      final fileKeyToContent = {fileKey: content};
-
-      print(
-          'Sending updated YAML to FlutterFlow for file: $fileName (key: $fileKey)');
-      print('Original filename: "$fileName"');
-      print('Converted file key: "$fileKey"');
-      print('Content length: ${content.length} chars');
-
-      // Call the FlutterFlow API
-      await FlutterFlowApiService.updateProjectYaml(
-        projectId: projectId,
-        apiToken: apiToken,
-        fileKeyToContent: fileKeyToContent,
-      );
-
-      // Update the UI to show success
-      setState(() {
-        _operationMessage = 'File "$fileName" saved and synced to FlutterFlow.';
-        _generatedYamlMessage =
-            '$_operationMessage\n\nThe file has been updated in your FlutterFlow project.';
-
-        // Track successful sync timestamp
-        _fileSyncTimestamps[fileName] = DateTime.now();
-      });
-
-      print('Successfully updated FlutterFlow project with file: $fileName');
-    } catch (e) {
-      print('Error updating FlutterFlow project: $e');
-
-      // Update the UI to show the error
-      setState(() {
-        _operationMessage =
-            'File "$fileName" saved locally, but failed to sync to FlutterFlow.';
-        _generatedYamlMessage =
-            '$_operationMessage\n\nError: $e\n\nThe file has been updated locally but not synced to FlutterFlow.';
-      });
+      // Note: API update is now handled automatically by YamlContentViewer
+      // after successful validation
     }
   }
 
@@ -871,6 +813,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 _selectedFilePath!, content);
                                           }
                                         : null,
+                                    onFileUpdated: _selectedFilePath != null
+                                        ? (filePath) {
+                                            // Update sync timestamp when file is successfully updated via API
+                                            setState(() {
+                                              _fileSyncTimestamps[
+                                                      _selectedFilePath!] =
+                                                  DateTime.now();
+                                              _operationMessage =
+                                                  'File "$_selectedFilePath" saved and synced to FlutterFlow.';
+                                              _generatedYamlMessage =
+                                                  '$_operationMessage\n\nThe file has been updated in your FlutterFlow project.';
+                                            });
+                                          }
+                                        : null,
                                   ),
                                 ),
                               ],
@@ -1222,113 +1178,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     color: Colors.amber[800],
                                                   ),
                                                 ),
-                                              // Show status indicators for recently validated/updated/synced files
-                                              // Validation indicator
-                                              if (_fileValidationTimestamps
-                                                  .containsKey(fileName))
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          left: 4.0),
-                                                  child: Tooltip(
-                                                    message:
-                                                        'Recently validated',
-                                                    child: Container(
-                                                      padding:
-                                                          EdgeInsets.symmetric(
-                                                              horizontal: 4,
-                                                              vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color:
-                                                            Colors.green[100],
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(6),
-                                                        border: Border.all(
-                                                            color: Colors
-                                                                .green[300]!,
-                                                            width: 1),
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons.verified,
-                                                            size: 12,
-                                                            color: Colors
-                                                                .green[700],
-                                                          ),
-                                                          SizedBox(width: 2),
-                                                          Text(
-                                                            'Valid',
-                                                            style: TextStyle(
-                                                              fontSize: 9,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .bold,
-                                                              color: Colors
-                                                                  .green[800],
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              // Update indicator
-                                              if (_fileUpdateTimestamps
-                                                  .containsKey(fileName))
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          left: 4.0),
-                                                  child: Tooltip(
-                                                    message:
-                                                        'Recently updated locally',
-                                                    child: Container(
-                                                      padding:
-                                                          EdgeInsets.symmetric(
-                                                              horizontal: 4,
-                                                              vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.blue[100],
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(6),
-                                                        border: Border.all(
-                                                            color: Colors
-                                                                .blue[300]!,
-                                                            width: 1),
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons.edit,
-                                                            size: 12,
-                                                            color: Colors
-                                                                .blue[700],
-                                                          ),
-                                                          SizedBox(width: 2),
-                                                          Text(
-                                                            'Updated',
-                                                            style: TextStyle(
-                                                              fontSize: 9,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .bold,
-                                                              color: Colors
-                                                                  .blue[800],
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              // Sync indicator
+                                              // Show the most recent status indicator only
+                                              // Priority: Synced > Updated > Valid
                                               if (_fileSyncTimestamps
                                                   .containsKey(fileName))
                                                 Padding(
@@ -1380,6 +1231,109 @@ class _HomeScreenState extends State<HomeScreen> {
                                                       ),
                                                     ),
                                                   ),
+                                                )
+                                              else if (_fileUpdateTimestamps
+                                                  .containsKey(fileName))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 4.0),
+                                                  child: Tooltip(
+                                                    message:
+                                                        'Recently updated locally',
+                                                    child: Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 4,
+                                                              vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.blue[100],
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        border: Border.all(
+                                                            color: Colors
+                                                                .blue[300]!,
+                                                            width: 1),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.edit,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .blue[700],
+                                                          ),
+                                                          SizedBox(width: 2),
+                                                          Text(
+                                                            'Updated',
+                                                            style: TextStyle(
+                                                              fontSize: 9,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .blue[800],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                )
+                                              else if (_fileValidationTimestamps
+                                                  .containsKey(fileName))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 4.0),
+                                                  child: Tooltip(
+                                                    message:
+                                                        'Recently validated',
+                                                    child: Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 4,
+                                                              vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color:
+                                                            Colors.green[100],
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        border: Border.all(
+                                                            color: Colors
+                                                                .green[300]!,
+                                                            width: 1),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.verified,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .green[700],
+                                                          ),
+                                                          SizedBox(width: 2),
+                                                          Text(
+                                                            'Valid',
+                                                            style: TextStyle(
+                                                              fontSize: 9,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .green[800],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
                                                 ),
                                             ],
                                           ),
@@ -1393,14 +1347,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                       if (isExpanded)
                                         isEditing
                                             ? ElevatedButton.icon(
-                                                icon: Icon(Icons.save,
-                                                    size: 16,
-                                                    color: Colors.white),
-                                                label: Text('Save'),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.green,
-                                                  foregroundColor: Colors.white,
-                                                ),
+                                                icon: const Icon(Icons.save,
+                                                    size: 14),
+                                                label: const Text('Save'),
+                                                style: _getFileButtonStyle(
+                                                    backgroundColor:
+                                                        AppTheme.successColor),
                                                 onPressed: () async {
                                                   await _applyFileChanges(
                                                       fileName,
@@ -1414,26 +1366,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 },
                                               )
                                             : ElevatedButton.icon(
-                                                icon: Icon(
-                                                  Icons.edit,
-                                                  size: 16,
-                                                  color: Colors.white,
-                                                ),
-                                                label: Text(
-                                                  'Edit',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.blue,
-                                                  foregroundColor: Colors.white,
-                                                  elevation: 3,
-                                                  padding: EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 0),
-                                                  minimumSize: Size(0, 32),
-                                                ),
+                                                icon: const Icon(Icons.edit,
+                                                    size: 14),
+                                                label: const Text('Edit'),
+                                                style: _getFileButtonStyle(
+                                                    backgroundColor:
+                                                        AppTheme.primaryColor),
                                                 onPressed: () {
                                                   // Enter edit mode
                                                   setState(() {
@@ -1446,36 +1384,23 @@ class _HomeScreenState extends State<HomeScreen> {
                                               ),
                                       // Copy button
                                       ElevatedButton.icon(
-                                        icon: Icon(Icons.copy,
-                                            size: 16, color: Colors.white),
-                                        label: Text('Copy',
-                                            style: TextStyle(fontSize: 12)),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.blue,
-                                          foregroundColor: Colors.white,
-                                          padding: EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 0),
-                                          minimumSize: Size(0, 32),
-                                        ),
+                                        icon: const Icon(Icons.copy, size: 14),
+                                        label: const Text('Copy'),
+                                        style: _getFileButtonStyle(),
                                         onPressed: () {
                                           _fallbackClipboardCopy(
                                               context, fileName, fileContent);
                                         },
                                       ),
-                                      SizedBox(width: 8),
+                                      const SizedBox(width: 8),
                                       // Make View button more prominent
                                       ElevatedButton.icon(
-                                        icon: Icon(Icons.visibility,
-                                            size: 16, color: Colors.white),
-                                        label: Text('View',
-                                            style: TextStyle(fontSize: 12)),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.green,
-                                          foregroundColor: Colors.white,
-                                          padding: EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 0),
-                                          minimumSize: Size(0, 32),
-                                        ),
+                                        icon: const Icon(Icons.visibility,
+                                            size: 14),
+                                        label: const Text('View'),
+                                        style: _getFileButtonStyle(
+                                            backgroundColor:
+                                                AppTheme.successColor),
                                         onPressed: () {
                                           // Switch to tree view and select this file
                                           setState(() {
@@ -1986,5 +1911,24 @@ class _HomeScreenState extends State<HomeScreen> {
             '$_operationMessage\n\nError: $e\n\nFiles are saved locally but not synced to FlutterFlow.';
       });
     }
+  }
+
+  // Helper method for consistent button styling
+  ButtonStyle _getFileButtonStyle({Color? backgroundColor}) {
+    return ElevatedButton.styleFrom(
+      backgroundColor: backgroundColor ?? AppTheme.surfaceColor,
+      foregroundColor: Colors.white,
+      textStyle: const TextStyle(
+        fontWeight: FontWeight.w500,
+        fontSize: 12,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4),
+      ),
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      minimumSize: const Size(0, 28),
+    );
   }
 }
