@@ -151,6 +151,17 @@ jobs:
             cp ../../web/flutter_bootstrap.js .
           fi
 
+          # Verify that flutter.js is loaded before flutter_bootstrap.js in index.html
+          echo "🔍 Checking script loading order in index.html:"
+          grep -n "flutter" index.html || echo "No flutter scripts found"
+
+          # Make sure flutter.js is included and loaded first
+          if ! grep -q "flutter.js" index.html; then
+            echo "⚠️  flutter.js not found in index.html, adding it..."
+            # Add flutter.js before flutter_bootstrap.js
+            sed -i 's|<script src="flutter_bootstrap.js" async></script>|<script src="flutter.js" defer></script>\n  <script src="flutter_bootstrap.js" defer></script>|' index.html
+          fi
+
           # Verify critical files exist
           echo "🔍 Verifying build files:"
           ls -la main.dart.js flutter.js || echo "Some JS files missing"
