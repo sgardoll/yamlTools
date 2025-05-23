@@ -30,6 +30,12 @@ jobs:
         with:
           fetch-depth: 0 # Fetch full history for complete project state
 
+      - name: Verify this is the primary workflow
+        run: |
+          echo "🚀 Running custom GitHub Pages deployment workflow"
+          echo "📝 Make sure Settings > Pages > Source = 'GitHub Actions'"
+          echo "❌ If you see 'pages-build-deployment' also running, change Pages source setting"
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
