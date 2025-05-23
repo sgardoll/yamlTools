@@ -1,3 +1,5 @@
+# This workflow builds and deploys the Flutter web app to GitHub Pages
+# Make sure Repository Settings > Pages > Source is set to "GitHub Actions"
 name: Build and Deploy to GitHub Pages
 
 on:
