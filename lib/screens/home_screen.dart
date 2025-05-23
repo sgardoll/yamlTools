@@ -858,180 +858,227 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       color: AppTheme.backgroundColor,
       child: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 600),
-          margin: const EdgeInsets.all(24),
-          padding: const EdgeInsets.all(32),
-          decoration: AppTheme.cardDecoration,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Header section
-              Column(
-                children: [
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Color(0xFF4F46E5), Color(0xFF3B82F6)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+        child: SingleChildScrollView(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 600),
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
+            decoration: AppTheme.cardDecoration,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Header section
+                Column(
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF4F46E5), Color(0xFF3B82F6)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primaryColor.withOpacity(0.2),
+                            offset: Offset(0, 4),
+                            blurRadius: 8,
+                          ),
+                        ],
                       ),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primaryColor.withOpacity(0.2),
-                          offset: Offset(0, 4),
-                          blurRadius: 8,
+                      child: Stack(
+                        children: [
+                          // FlutterFlow-style logo design
+                          Positioned(
+                            top: 12,
+                            left: 12,
+                            child: Container(
+                              width: 16,
+                              height: 16,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.9),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 20,
+                            left: 32,
+                            child: Container(
+                              width: 20,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.7),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 36,
+                            left: 16,
+                            child: Container(
+                              width: 32,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.8),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                          // Central "F" for FlutterFlow
+                          Center(
+                            child: Text(
+                              'F',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Load FlutterFlow Project',
+                      style: AppTheme.headingLarge.copyWith(fontSize: 28),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Enter your project credentials to get started',
+                      style: AppTheme.bodyLarge.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 32),
+
+                // Form section
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Project ID field
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Project ID',
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _projectIdController,
+                          decoration: AppTheme.inputDecoration(
+                            hintText: 'Enter your FlutterFlow project ID',
+                            prefixIcon: const Icon(Icons.folder_outlined),
+                          ),
+                          style: AppTheme.bodyMedium,
                         ),
                       ],
                     ),
-                    child: const Center(
-                      child: Icon(
-                        Icons.upload_file,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Load FlutterFlow Project',
-                    style: AppTheme.headingLarge.copyWith(fontSize: 28),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Enter your project credentials to get started',
-                    style: AppTheme.bodyLarge.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 32),
+                    const SizedBox(height: 20),
 
-              // Form section
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Project ID field
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Project ID',
-                        style: AppTheme.bodyMedium.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
+                    // API Token field
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'API Token',
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _apiTokenController,
+                          decoration: AppTheme.inputDecoration(
+                            hintText: 'Enter your FlutterFlow API token',
+                            prefixIcon: const Icon(Icons.key),
+                          ),
+                          style: AppTheme.bodyMedium,
+                          obscureText: true,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 28),
+
+                    // Fetch button
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: hasCredentials && !_isLoading
+                            ? _fetchProjectYaml
+                            : null,
+                        icon: _isLoading
+                            ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white),
+                                ),
+                              )
+                            : const Icon(Icons.download, size: 18),
+                        label: Text(_isLoading ? 'Loading...' : 'Fetch YAML'),
+                        style: AppTheme.primaryButtonStyle.copyWith(
+                          minimumSize: MaterialStateProperty.all(
+                              Size(double.infinity, 48)),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _projectIdController,
-                        decoration: AppTheme.inputDecoration(
-                          hintText: 'Enter your FlutterFlow project ID',
-                          prefixIcon: const Icon(Icons.folder_outlined),
-                        ),
-                        style: AppTheme.bodyMedium,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
+                    ),
+                  ],
+                ),
 
-                  // API Token field
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'API Token',
-                        style: AppTheme.bodyMedium.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _apiTokenController,
-                        decoration: AppTheme.inputDecoration(
-                          hintText: 'Enter your FlutterFlow API token',
-                          prefixIcon: const Icon(Icons.key),
-                        ),
-                        style: AppTheme.bodyMedium,
-                        obscureText: true,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 28),
+                const SizedBox(height: 32),
 
-                  // Fetch button
-                  SizedBox(
-                    height: 48,
-                    child: ElevatedButton.icon(
-                      onPressed: hasCredentials && !_isLoading
-                          ? _fetchProjectYaml
-                          : null,
-                      icon: _isLoading
-                          ? SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            )
-                          : const Icon(Icons.download, size: 18),
-                      label: Text(_isLoading ? 'Loading...' : 'Fetch YAML'),
-                      style: AppTheme.primaryButtonStyle.copyWith(
-                        minimumSize: MaterialStateProperty.all(
-                            Size(double.infinity, 48)),
+                // Recent projects section
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.history,
+                          size: 18,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Recent Projects',
+                          style: AppTheme.headingSmall.copyWith(fontSize: 16),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      height: 180, // Reduced height to prevent overflow
+                      decoration: BoxDecoration(
+                        color: AppTheme.backgroundColor,
+                        borderRadius: BorderRadius.circular(8),
+                        border:
+                            Border.all(color: AppTheme.dividerColor, width: 1),
+                      ),
+                      child: RecentProjectsWidget(
+                        onProjectSelected: _handleProjectSelected,
+                        showHeader: false,
                       ),
                     ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 32),
-
-              // Recent projects section
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.history,
-                        size: 18,
-                        color: AppTheme.textSecondary,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Recent Projects',
-                        style: AppTheme.headingSmall.copyWith(fontSize: 16),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    height: 200,
-                    decoration: BoxDecoration(
-                      color: AppTheme.backgroundColor,
-                      borderRadius: BorderRadius.circular(8),
-                      border:
-                          Border.all(color: AppTheme.dividerColor, width: 1),
-                    ),
-                    child: RecentProjectsWidget(
-                      onProjectSelected: _handleProjectSelected,
-                      showHeader: false,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -160,7 +160,7 @@ class AppHeader extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: isPrimary
               ? Colors.white
-              : backgroundColor ?? Colors.white.withOpacity(0.1),
+              : backgroundColor ?? Colors.white.withOpacity(0.15),
           foregroundColor: isPrimary ? Color(0xFF4F46E5) : Colors.white,
           elevation: isPrimary ? 2 : 0,
           shadowColor:
@@ -170,9 +170,22 @@ class AppHeader extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             side: isPrimary
                 ? BorderSide.none
-                : BorderSide(color: Colors.white.withOpacity(0.2), width: 1),
+                : BorderSide(color: Colors.white.withOpacity(0.3), width: 1),
           ),
           minimumSize: Size(0, 36),
+        ).copyWith(
+          foregroundColor: MaterialStateProperty.resolveWith<Color>((states) {
+            if (isPrimary) {
+              return Color(0xFF4F46E5);
+            }
+            return Colors.white;
+          }),
+          iconColor: MaterialStateProperty.resolveWith<Color>((states) {
+            if (isPrimary) {
+              return Color(0xFF4F46E5);
+            }
+            return Colors.white;
+          }),
         ),
       ),
     );

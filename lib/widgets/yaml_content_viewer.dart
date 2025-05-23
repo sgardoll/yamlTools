@@ -367,8 +367,6 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       _textController.text = widget.content ?? '';
       _hasUnsavedChanges = false;
       _isEditing = false;
-      _validationError = null;
-      _isValid = true;
     });
   }
 
@@ -467,163 +465,66 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           topRight: Radius.circular(8),
         ),
       ),
-      child: Row(
+      child: Column(
         children: [
-          // File info section
-          Expanded(
-            child: Row(
-              children: [
-                Icon(
-                  Icons.description,
-                  size: 18,
-                  color: AppTheme.primaryColor,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  widget.filePath.isNotEmpty ? widget.filePath : 'YAML Content',
-                  style: AppTheme.headingSmall.copyWith(fontSize: 16),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(width: 8),
-                if (widget.characterCount != null)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration:
-                        AppTheme.statusBadgeDecoration(AppTheme.textMuted),
-                    child: Text(
-                      '${widget.characterCount} chars',
-                      style: AppTheme.captionLarge.copyWith(
-                        color: AppTheme.textMuted,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          const SizedBox(width: 16),
-
-          // Status and action buttons
+          // First row - File info and main actions
           Row(
             children: [
-              // Validation status indicator
-              if (_isValidating)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration:
-                      AppTheme.statusBadgeDecoration(AppTheme.infoColor),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(AppTheme.infoColor),
-                        ),
+              // File info section
+              Expanded(
+                flex: 2,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.description,
+                      size: 18,
+                      color: AppTheme.primaryColor,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        widget.filePath.isNotEmpty
+                            ? widget.filePath.split('/').last
+                            : 'YAML Content',
+                        style: AppTheme.headingSmall.copyWith(fontSize: 14),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Validating',
-                        style: AppTheme.captionLarge.copyWith(
-                          color: AppTheme.infoColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else if (_isUpdating)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration:
-                      AppTheme.statusBadgeDecoration(AppTheme.updatedColor),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                              AppTheme.updatedColor),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Updating',
-                        style: AppTheme.captionLarge.copyWith(
-                          color: AppTheme.updatedColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else if (_validationError != null)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration:
-                      AppTheme.statusBadgeDecoration(AppTheme.errorColor),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        color: AppTheme.errorColor,
-                        size: 12,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Invalid',
-                        style: AppTheme.captionLarge.copyWith(
-                          color: AppTheme.errorColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else if (_isValid &&
-                  widget.content != null &&
-                  widget.content!.isNotEmpty)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration:
-                      AppTheme.statusBadgeDecoration(AppTheme.validColor),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.check_circle_outline,
-                        color: AppTheme.validColor,
-                        size: 12,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Valid',
-                        style: AppTheme.captionLarge.copyWith(
-                          color: AppTheme.validColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Character count (flexible)
+              if (widget.characterCount != null)
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.backgroundColor,
+                      borderRadius: BorderRadius.circular(4),
+                      border:
+                          Border.all(color: AppTheme.dividerColor, width: 1),
+                    ),
+                    child: Text(
+                      '${widget.characterCount} chars',
+                      style: AppTheme.bodySmall.copyWith(fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
+            ],
+          ),
 
-              // Action buttons
-              if (!widget.isReadOnly && widget.content != null) ...[
-                const SizedBox(width: 12),
+          const SizedBox(height: 12),
 
+          // Second row - Action buttons (wrapped for overflow)
+          if (!widget.isReadOnly && widget.content != null)
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              alignment: WrapAlignment.end,
+              children: [
                 // Copy button
                 _buildActionButton(
                   icon: _isCopied ? Icons.check : Icons.copy,
@@ -633,8 +534,6 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                       _isCopied ? AppTheme.validColor : AppTheme.textSecondary,
                 ),
 
-                const SizedBox(width: 8),
-
                 // Save/Discard buttons when editing with unsaved changes
                 if (_isEditing && _hasUnsavedChanges) ...[
                   _buildActionButton(
@@ -643,7 +542,6 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                     onPressed: _discardChanges,
                     color: AppTheme.errorColor,
                   ),
-                  const SizedBox(width: 8),
                   _buildActionButton(
                     icon: _isValidating || _isUpdating
                         ? Icons.hourglass_empty
@@ -658,31 +556,31 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                         : () => _saveChanges(),
                     color: AppTheme.successColor,
                   ),
-                  const SizedBox(width: 8),
                 ],
 
                 // Edit toggle button (or Cancel if editing without changes)
                 _buildActionButton(
-                  icon: _isEditing
-                      ? (_hasUnsavedChanges ? Icons.edit : Icons.visibility)
-                      : Icons.edit,
-                  label: _isEditing
-                      ? (_hasUnsavedChanges ? 'Editing' : 'View')
-                      : 'Edit',
-                  onPressed: _isEditing && !_hasUnsavedChanges
-                      ? _toggleEdit
-                      : _isEditing && _hasUnsavedChanges
-                          ? null // Disable when editing with unsaved changes
-                          : _toggleEdit,
-                  color: _isEditing
-                      ? (_hasUnsavedChanges
-                          ? AppTheme.warningColor
-                          : AppTheme.primaryColor)
-                      : AppTheme.textSecondary,
+                  icon: _isEditing ? Icons.cancel : Icons.edit,
+                  label: _isEditing ? 'Cancel' : 'Edit',
+                  onPressed: _isEditing ? _exitEditMode : _enterEditMode,
+                  color:
+                      _isEditing ? AppTheme.errorColor : AppTheme.primaryColor,
                 ),
+
+                // Validate button (always available when not read-only)
+                if (widget.projectId.isNotEmpty)
+                  _buildActionButton(
+                    icon:
+                        _isValidating ? Icons.hourglass_empty : Icons.verified,
+                    label: _isValidating ? 'Validating...' : 'Validate',
+                    onPressed: _isValidating
+                        ? null
+                        : () => _validateYaml(_textController.text),
+                    color:
+                        _isValid ? AppTheme.validColor : AppTheme.warningColor,
+                  ),
               ],
-            ],
-          ),
+            ),
         ],
       ),
     );
@@ -819,6 +717,18 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   void _toggleEdit() {
     setState(() {
       _isEditing = !_isEditing;
+    });
+  }
+
+  void _exitEditMode() {
+    setState(() {
+      _isEditing = false;
+    });
+  }
+
+  void _enterEditMode() {
+    setState(() {
+      _isEditing = true;
     });
   }
 }

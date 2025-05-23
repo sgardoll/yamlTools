@@ -153,7 +153,10 @@ class ProjectHeader extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              color: isActive ? Colors.white : Color(0xFF94A3B8), // Slate-400
+              color: isActive
+                  ? Colors.white
+                  : Color(
+                      0xFF94A3B8), // Explicit white for active, slate-400 for inactive
               fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
               fontSize: 14,
               letterSpacing: -0.25,
