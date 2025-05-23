@@ -107,9 +107,6 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         continue;
       }
 
-      // Mark as processed
-      _processedFiles.add(filePath);
-
       // Split the path into components
       List<String> pathParts = [];
 
@@ -122,79 +119,76 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         pathParts = filePath.split('/');
       }
 
-      // Skip empty paths and process hierarchical files (files with path components)
-      if (pathParts.length > 1 ||
-          (pathParts.length == 1 && !pathParts[0].endsWith('.yaml'))) {
-        // Build path incrementally to create the tree
+      // Only process hierarchical files (files with multiple path components)
+      if (pathParts.length > 1) {
+        // Mark as processed only when we actually process it
+        _processedFiles.add(filePath);
+
+        TreeNode currentNode = _rootNode;
+
+        // Build the path in the tree
         String currentPath = '';
-        TreeNode parentNode = _rootNode;
-
         for (int i = 0; i < pathParts.length; i++) {
-          String part = pathParts[i];
-          String newPath = currentPath.isEmpty ? part : '$currentPath/$part';
+          final pathPart = pathParts[i];
+          final isLeaf = (i == pathParts.length - 1);
 
-          // Skip if empty
-          if (part.isEmpty) continue;
+          // Update current path
+          currentPath =
+              currentPath.isEmpty ? pathPart : '$currentPath/$pathPart';
 
-          // If node for this path doesn't exist yet, create it
-          if (!pathToNode.containsKey(newPath)) {
-            // Determine the node type based on path and position
-            NodeType nodeType =
-                _determineNodeType(part, i == pathParts.length - 1);
-
-            // Create the new node
-            TreeNode newNode = TreeNode(
-              name: part,
+          // Check if this node already exists
+          TreeNode? existingNode = pathToNode[currentPath];
+          if (existingNode == null) {
+            // Create new node
+            final nodeType = _determineNodeType(pathPart, isLeaf);
+            final newNode = TreeNode(
+              name: pathPart,
               type: nodeType,
-              filePath: i == pathParts.length - 1
-                  ? filePath
-                  : null, // Only leaf nodes have file paths
+              filePath: isLeaf ? filePath : null,
             );
 
-            // Add to parent's children
-            parentNode.children.add(newNode);
-
-            // Store in map for future reference
-            pathToNode[newPath] = newNode;
+            currentNode.children.add(newNode);
+            pathToNode[currentPath] = newNode;
+            currentNode = newNode;
+          } else {
+            currentNode = existingNode;
           }
-
-          // Update parent for next iteration
-          parentNode = pathToNode[newPath]!;
-          currentPath = newPath;
         }
       }
     }
 
-    // Second pass: Add top-level YAML files
+    // Second pass: Process flat files (those without paths - single level archive files)
     for (String filePath in filePaths) {
       // Skip non-YAML files and already processed files
       if (!filePath.endsWith('.yaml') ||
-          (filePath.contains('/') && filePath.split('/').length > 1) ||
           filePath.contains('complete_raw.yaml') ||
           filePath.contains('raw_project.yaml') ||
           _processedFiles.contains(filePath)) {
         continue;
       }
 
-      String displayName = filePath;
-      if (filePath.startsWith('archive_')) {
-        displayName = filePath.replaceFirst('archive_', '');
+      // Only process files that don't have path separators (flat files)
+      if (!filePath.contains('/')) {
+        String displayName = filePath;
+        if (filePath.startsWith('archive_')) {
+          displayName = filePath.replaceFirst('archive_', '');
+        }
+
+        // Skip if we already processed a file with this display name
+        if (processedDisplayNames.contains(displayName)) continue;
+
+        // Mark as processed
+        _processedFiles.add(filePath);
+        processedDisplayNames.add(displayName);
+
+        TreeNode fileNode = TreeNode(
+          name: displayName,
+          type: NodeType.file,
+          filePath: filePath,
+        );
+
+        _rootNode.children.add(fileNode);
       }
-
-      // Skip if we already processed a file with this display name
-      if (processedDisplayNames.contains(displayName)) continue;
-
-      // Mark as processed
-      _processedFiles.add(filePath);
-      processedDisplayNames.add(displayName);
-
-      TreeNode fileNode = TreeNode(
-        name: displayName,
-        type: NodeType.file,
-        filePath: filePath,
-      );
-
-      _rootNode.children.add(fileNode);
     }
 
     // Process nodes to ensure they're properly ordered
