@@ -46,6 +46,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, bool> _fileEditModes = {}; // Track which files are in edit mode
   Map<String, DateTime> _fileValidationTimestamps =
       {}; // Track when files were validated successfully
+  Map<String, DateTime> _fileUpdateTimestamps =
+      {}; // Track when files were updated/saved locally
+  Map<String, DateTime> _fileSyncTimestamps =
+      {}; // Track when files were successfully synced to FlutterFlow
 
   bool _showExportView = true; // Default to export view
   bool _isOutputExpanded = false; // For expandable output section
@@ -267,6 +271,9 @@ class _HomeScreenState extends State<HomeScreen> {
         // Track validation timestamp when file is saved
         _fileValidationTimestamps[fileName] = DateTime.now();
 
+        // Track update timestamp when file is saved
+        _fileUpdateTimestamps[fileName] = DateTime.now();
+
         // Update the message to indicate a manual edit was made
         _operationMessage = 'File "$fileName" manually edited.';
         _generatedYamlMessage =
@@ -317,6 +324,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _operationMessage = 'File "$fileName" saved and synced to FlutterFlow.';
         _generatedYamlMessage =
             '$_operationMessage\n\nThe file has been updated in your FlutterFlow project.';
+
+        // Track successful sync timestamp
+        _fileSyncTimestamps[fileName] = DateTime.now();
       });
 
       print('Successfully updated FlutterFlow project with file: $fileName');
@@ -369,6 +379,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _fileControllers.clear(); // Clear any existing file editors
       _fileEditModes.clear();
       _fileValidationTimestamps.clear(); // Clear validation timestamps
+      _fileUpdateTimestamps.clear(); // Clear update timestamps
+      _fileSyncTimestamps.clear(); // Clear sync timestamps
       _hasModifications = false; // Reset modification state for fresh fetch
       _expandedFiles.clear(); // Clear expanded files state
       _collapseCredentials = true; // Collapse credentials after fetch
@@ -1210,7 +1222,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     color: Colors.amber[800],
                                                   ),
                                                 ),
-                                              // Show validation indicator for recently validated files
+                                              // Show status indicators for recently validated/updated/synced files
+                                              // Validation indicator
                                               if (_fileValidationTimestamps
                                                   .containsKey(fileName))
                                                 Padding(
@@ -1219,44 +1232,151 @@ class _HomeScreenState extends State<HomeScreen> {
                                                           left: 4.0),
                                                   child: Tooltip(
                                                     message:
-                                                        'Recently validated and saved',
-                                                    child: Icon(
-                                                      Icons.check_circle,
-                                                      size: 16,
-                                                      color: Colors.green[700],
+                                                        'Recently validated',
+                                                    child: Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 4,
+                                                              vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color:
+                                                            Colors.green[100],
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        border: Border.all(
+                                                            color: Colors
+                                                                .green[300]!,
+                                                            width: 1),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.verified,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .green[700],
+                                                          ),
+                                                          SizedBox(width: 2),
+                                                          Text(
+                                                            'Valid',
+                                                            style: TextStyle(
+                                                              fontSize: 9,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .green[800],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
-                                              // Show "Valid" text badge for recently validated files
-                                              if (_fileValidationTimestamps
+                                              // Update indicator
+                                              if (_fileUpdateTimestamps
                                                   .containsKey(fileName))
                                                 Padding(
                                                   padding:
                                                       const EdgeInsets.only(
-                                                          left: 6.0),
-                                                  child: Container(
-                                                    padding:
-                                                        EdgeInsets.symmetric(
-                                                            horizontal: 6,
-                                                            vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.green[100],
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              8),
-                                                      border: Border.all(
-                                                          color: Colors
-                                                              .green[300]!,
-                                                          width: 1),
+                                                          left: 4.0),
+                                                  child: Tooltip(
+                                                    message:
+                                                        'Recently updated locally',
+                                                    child: Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 4,
+                                                              vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.blue[100],
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        border: Border.all(
+                                                            color: Colors
+                                                                .blue[300]!,
+                                                            width: 1),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.edit,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .blue[700],
+                                                          ),
+                                                          SizedBox(width: 2),
+                                                          Text(
+                                                            'Updated',
+                                                            style: TextStyle(
+                                                              fontSize: 9,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .blue[800],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
                                                     ),
-                                                    child: Text(
-                                                      'Valid',
-                                                      style: TextStyle(
-                                                        fontSize: 10,
-                                                        fontWeight:
-                                                            FontWeight.bold,
+                                                  ),
+                                                ),
+                                              // Sync indicator
+                                              if (_fileSyncTimestamps
+                                                  .containsKey(fileName))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 4.0),
+                                                  child: Tooltip(
+                                                    message:
+                                                        'Recently synced to FlutterFlow',
+                                                    child: Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 4,
+                                                              vertical: 2),
+                                                      decoration: BoxDecoration(
                                                         color:
-                                                            Colors.green[800],
+                                                            Colors.purple[100],
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        border: Border.all(
+                                                            color: Colors
+                                                                .purple[300]!,
+                                                            width: 1),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.cloud_done,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .purple[700],
+                                                          ),
+                                                          SizedBox(width: 2),
+                                                          Text(
+                                                            'Synced',
+                                                            style: TextStyle(
+                                                              fontSize: 9,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .purple[800],
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
                                                     ),
                                                   ),
@@ -1708,6 +1828,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _fileControllers.clear();
       _fileEditModes.clear();
       _fileValidationTimestamps.clear(); // Clear validation timestamps
+      _fileUpdateTimestamps.clear(); // Clear update timestamps
+      _fileSyncTimestamps.clear(); // Clear sync timestamps
       _hasModifications = false;
     });
   }
@@ -1752,6 +1874,9 @@ class _HomeScreenState extends State<HomeScreen> {
         // Track validation timestamp for AI-generated changes
         _fileValidationTimestamps[existingFile] = DateTime.now();
 
+        // Track update timestamp for AI-generated changes
+        _fileUpdateTimestamps[existingFile] = DateTime.now();
+
         _operationMessage =
             'File "$existingFile" updated with AI-generated changes.';
         _generatedYamlMessage = _operationMessage;
@@ -1779,6 +1904,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Track validation timestamp for new AI-generated file
         _fileValidationTimestamps[fileName] = DateTime.now();
+
+        // Track update timestamp for new AI-generated file
+        _fileUpdateTimestamps[fileName] = DateTime.now();
 
         _operationMessage = 'AI-generated YAML file "$fileName" created.';
         _generatedYamlMessage =
@@ -1839,6 +1967,12 @@ class _HomeScreenState extends State<HomeScreen> {
             'Successfully saved ${_changedFiles.length} files to FlutterFlow.';
         _generatedYamlMessage =
             '$_operationMessage\n\nAll modified files have been synced to your FlutterFlow project.';
+
+        // Track sync timestamps for all successfully saved files
+        final currentTime = DateTime.now();
+        _changedFiles.keys.forEach((fileName) {
+          _fileSyncTimestamps[fileName] = currentTime;
+        });
       });
 
       print('Successfully saved all files to FlutterFlow');
