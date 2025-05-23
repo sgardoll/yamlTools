@@ -54,7 +54,7 @@ class OpenAIClient {
 }
 
 class AIAssistPanel extends StatefulWidget {
-  final Function(String, {String? existingFile}) onUpdateYaml;
+  final Future<void> Function(String, {String? existingFile}) onUpdateYaml;
   final Map<String, String> currentFiles;
   final Function() onClose;
 
@@ -367,99 +367,117 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
 
   void _showYamlUpdateDialog(
       String yamlContent, List<String> potentialTargets, String? bestMatch) {
+    String? selectedFile = bestMatch; // Track the selected file
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Apply FlutterFlow YAML Changes'),
-        content: Container(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                    'The AI has suggested the following changes to your FlutterFlow project:'),
-                SizedBox(height: 12),
-                Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black12,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: SelectableText(
-                    yamlContent,
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                SizedBox(height: 16),
-
-                // Add file selection for updating existing files
-                if (potentialTargets.isNotEmpty) ...[
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Apply FlutterFlow YAML Changes'),
+          content: Container(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    'Select the file to update:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
+                      'The AI has suggested the following changes to your FlutterFlow project:'),
+                  SizedBox(height: 12),
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      yamlContent,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
                     ),
                   ),
-                  SizedBox(height: 8),
-                  ...potentialTargets
-                      .map(
-                        (fileName) => RadioListTile<String>(
-                          title: Text(fileName,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: fileName == bestMatch
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                              )),
-                          value: fileName,
-                          groupValue: bestMatch,
-                          onChanged: (value) {
-                            Navigator.pop(context);
-                            if (value != null) {
-                              // Show confirmation dialog for the selected file
-                              _confirmFileUpdate(yamlContent, value);
-                            }
-                          },
-                          dense: true,
-                          selected: fileName == bestMatch,
-                        ),
-                      )
-                      .toList(),
-                  Divider(),
-                ],
+                  SizedBox(height: 16),
 
-                Text(
-                  potentialTargets.isEmpty
-                      ? 'These changes will be added as a new file in your project.'
-                      : 'Or create a new file with these changes:',
-                  style: TextStyle(
-                    fontStyle: FontStyle.italic,
-                    color: Colors.orange[800],
+                  // Add file selection for updating existing files
+                  if (potentialTargets.isNotEmpty) ...[
+                    Text(
+                      'Select the file to update:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    ...potentialTargets
+                        .map(
+                          (fileName) => RadioListTile<String>(
+                            title: Text(fileName,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: fileName == selectedFile
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                )),
+                            value: fileName,
+                            groupValue: selectedFile,
+                            onChanged: (value) {
+                              setDialogState(() {
+                                selectedFile = value;
+                              });
+                            },
+                            dense: true,
+                            selected: fileName == selectedFile,
+                          ),
+                        )
+                        .toList(),
+                    Divider(),
+                  ],
+
+                  Text(
+                    potentialTargets.isEmpty
+                        ? 'These changes will be added as a new file in your project.'
+                        : 'Or create a new file with these changes:',
+                    style: TextStyle(
+                      fontStyle: FontStyle.italic,
+                      color: Colors.orange[800],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+
+            // Update existing file button (only show if a file is selected)
+            if (potentialTargets.isNotEmpty && selectedFile != null)
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  // Show confirmation dialog for the selected file
+                  _confirmFileUpdate(yamlContent, selectedFile!);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                ),
+                child: Text('Update Selected File'),
+              ),
+
+            // Create new file button
+            ElevatedButton(
+              onPressed: () async {
+                // Create a new file if no existing file is selected
+                await widget.onUpdateYaml(yamlContent);
+                Navigator.pop(context);
+              },
+              child: Text('Create New File'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              // Create a new file if no existing file is selected
-              widget.onUpdateYaml(yamlContent);
-              Navigator.pop(context);
-            },
-            child: Text('Create New File'),
-          ),
-        ],
       ),
     );
   }
@@ -468,17 +486,26 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
   void _confirmFileUpdate(String yamlContent, String fileName) {
     final existingContent = widget.currentFiles[fileName] ?? '';
 
+    // Debug output to ensure content is available
+    print('DEBUG: Confirming update for $fileName');
+    print('DEBUG: Existing content length: ${existingContent.length}');
+    print('DEBUG: New content length: ${yamlContent.length}');
+    print(
+        'DEBUG: New content preview: ${yamlContent.length > 100 ? yamlContent.substring(0, 100) + "..." : yamlContent}');
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Confirm Update to $fileName'),
         content: Container(
           width: double.maxFinite,
-          height: 400,
+          height: 500, // Increased height
           child: Column(
             children: [
               Text(
-                  'This will replace the existing file with the AI-generated content.'),
+                'This will replace the existing file with the AI-generated content.',
+                style: TextStyle(fontSize: 14),
+              ),
               SizedBox(height: 16),
               Expanded(
                 child: DefaultTabController(
@@ -491,43 +518,21 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                           Tab(text: 'New Version'),
                         ],
                         labelColor: Colors.blue,
+                        unselectedLabelColor: Colors.grey,
                       ),
                       Expanded(
                         child: TabBarView(
                           children: [
                             // Current file content
-                            SingleChildScrollView(
-                              child: Container(
-                                padding: EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.black12,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: SelectableText(
-                                  existingContent,
-                                  style: TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
+                            _buildContentTab(
+                              content: existingContent,
+                              label: 'Current content',
                             ),
-                            // New content
-                            SingleChildScrollView(
-                              child: Container(
-                                padding: EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.black12,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: SelectableText(
-                                  yamlContent,
-                                  style: TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
+                            // New content (AI-generated)
+                            _buildContentTab(
+                              content: yamlContent,
+                              label: 'AI-generated content',
+                              isNewContent: true,
                             ),
                           ],
                         ),
@@ -545,15 +550,107 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
             child: Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               // Update the existing file
-              widget.onUpdateYaml(yamlContent, existingFile: fileName);
+              await widget.onUpdateYaml(yamlContent, existingFile: fileName);
               Navigator.pop(context);
             },
             child: Text('Update File'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.orange,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper method to build content tabs with better styling
+  Widget _buildContentTab({
+    required String content,
+    required String label,
+    bool isNewContent = false,
+  }) {
+    return Container(
+      margin: EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: isNewContent
+            ? Colors.green.withOpacity(0.05)
+            : Colors.blue.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isNewContent
+              ? Colors.green.withOpacity(0.3)
+              : Colors.blue.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Content header
+          Container(
+            padding: EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isNewContent
+                  ? Colors.green.withOpacity(0.1)
+                  : Colors.blue.withOpacity(0.1),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(8),
+                topRight: Radius.circular(8),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isNewContent ? Icons.auto_awesome : Icons.description,
+                  size: 16,
+                  color: isNewContent ? Colors.green : Colors.blue,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: isNewContent ? Colors.green[800] : Colors.blue[800],
+                    fontSize: 12,
+                  ),
+                ),
+                Spacer(),
+                Text(
+                  '${content.length} chars',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Content area
+          Expanded(
+            child: content.isEmpty
+                ? Center(
+                    child: Text(
+                      'No content available',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  )
+                : SingleChildScrollView(
+                    padding: EdgeInsets.all(12),
+                    child: SelectableText(
+                      content,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        color: Colors.black87,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
           ),
         ],
       ),

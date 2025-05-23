@@ -1927,136 +1927,73 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Method to handle AI-generated YAML updates
-  void _updateYamlFromAI(String yamlContent, {String? existingFile}) {
+  Future<void> _updateYamlFromAI(String yamlContent,
+      {String? existingFile}) async {
     if (yamlContent.isEmpty) return;
 
     if (existingFile != null && _exportedFiles.containsKey(existingFile)) {
-      // Update existing file
+      // Update existing file - put it in editing mode like a manual edit
       setState(() {
         // Back up the original if this is the first modification
         if (!_originalFiles.containsKey(existingFile)) {
           _originalFiles[existingFile] = _exportedFiles[existingFile]!;
         }
 
-        // Update the file content
+        // Update the file content but don't auto-save - let user review and save manually
         _exportedFiles[existingFile] = yamlContent;
         _changedFiles[existingFile] = yamlContent;
         _hasModifications = true;
 
-        // Track validation timestamp for AI-generated changes
-        _fileValidationTimestamps[existingFile] = DateTime.now();
-
-        // Track update timestamp for AI-generated changes
-        _fileUpdateTimestamps[existingFile] = DateTime.now();
-
         _operationMessage =
-            'File "$existingFile" updated with AI-generated changes.';
+            'AI-generated changes applied to "$existingFile". Review the changes and click Save to upload to FlutterFlow.';
         _generatedYamlMessage = _operationMessage;
 
-        // Make sure the file is expanded
+        // Make sure the file is expanded and selected for viewing
         _expandedFiles.add(existingFile);
-
-        // Set the selected file
         _selectedFilePath = existingFile;
 
-        // Update the controller if it exists
-        if (_fileControllers.containsKey(existingFile)) {
+        // Update the controller and put in editing mode so Save/Discard buttons appear
+        if (!_fileControllers.containsKey(existingFile)) {
+          _fileControllers[existingFile] =
+              TextEditingController(text: yamlContent);
+        } else {
           _fileControllers[existingFile]!.text = yamlContent;
         }
+
+        // Switch to tree view to show the updated file
+        _selectedViewIndex = 1;
       });
+
+      // Mark the file as changed through the normal workflow to ensure proper tracking
+      await _applyFileChanges(existingFile, yamlContent);
     } else {
       // Create a new file with AI-generated content
       final String fileName =
           'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
 
       setState(() {
+        // Add to all the file maps so it appears in the tree
         _exportedFiles[fileName] = yamlContent;
         _changedFiles[fileName] = yamlContent;
         _hasModifications = true;
 
-        // Track validation timestamp for new AI-generated file
-        _fileValidationTimestamps[fileName] = DateTime.now();
+        _operationMessage =
+            'AI-generated YAML file "$fileName" created. Review and click Save to upload to FlutterFlow.';
+        _generatedYamlMessage = _operationMessage;
 
-        // Track update timestamp for new AI-generated file
-        _fileUpdateTimestamps[fileName] = DateTime.now();
-
-        _operationMessage = 'AI-generated YAML file "$fileName" created.';
-        _generatedYamlMessage =
-            '$_operationMessage\n\nThe file has been added to your project.';
-
-        // Auto-expand the new file
+        // Auto-expand and select the new file so it's visible
         _expandedFiles.add(fileName);
-
-        // Set the selected file
         _selectedFilePath = fileName;
-      });
-    }
-  }
 
-  // Update all modified files in FlutterFlow project at once
-  Future<void> _saveAllToFlutterFlow() async {
-    final projectId = _projectIdController.text;
-    final apiToken = _apiTokenController.text;
+        // Create a controller for the new file
+        _fileControllers[fileName] = TextEditingController(text: yamlContent);
 
-    // Skip API call if we don't have project credentials
-    if (projectId.isEmpty || apiToken.isEmpty) {
-      setState(() {
-        _operationMessage =
-            'Cannot save to FlutterFlow - missing project ID or API token.';
-        _generatedYamlMessage = _operationMessage;
-      });
-      return;
-    }
-
-    // Get all files that have been modified
-    if (_changedFiles.isEmpty) {
-      setState(() {
-        _operationMessage = 'No modified files to save.';
-        _generatedYamlMessage = _operationMessage;
-      });
-      return;
-    }
-
-    setState(() {
-      _operationMessage =
-          'Saving ${_changedFiles.length} files to FlutterFlow...';
-      _generatedYamlMessage = _operationMessage;
-    });
-
-    try {
-      print('Saving ${_changedFiles.length} files to FlutterFlow...');
-
-      // Call the FlutterFlow API with all changed files
-      await FlutterFlowApiService.updateMultipleProjectYamls(
-        projectId: projectId,
-        apiToken: apiToken,
-        fileNameToContent: _changedFiles,
-      );
-
-      // Update the UI to show success
-      setState(() {
-        _operationMessage =
-            'Successfully saved ${_changedFiles.length} files to FlutterFlow.';
-        _generatedYamlMessage =
-            '$_operationMessage\n\nAll modified files have been synced to your FlutterFlow project.';
-
-        // Track sync timestamps for all successfully saved files
-        final currentTime = DateTime.now();
-        _changedFiles.keys.forEach((fileName) {
-          _fileSyncTimestamps[fileName] = currentTime;
-        });
+        // Switch to tree view to show the new file
+        _selectedViewIndex = 1;
       });
 
-      print('Successfully saved all files to FlutterFlow');
-    } catch (e) {
-      print('Error saving files to FlutterFlow: $e');
-
-      // Update the UI to show the error
-      setState(() {
-        _operationMessage = 'Failed to save files to FlutterFlow.';
-        _generatedYamlMessage =
-            '$_operationMessage\n\nError: $e\n\nFiles are saved locally but not synced to FlutterFlow.';
-      });
+      // Mark the new file as changed through the normal workflow
+      await _applyFileChanges(fileName, yamlContent);
     }
   }
 

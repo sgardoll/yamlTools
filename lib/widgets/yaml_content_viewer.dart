@@ -566,19 +566,6 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                   color:
                       _isEditing ? AppTheme.errorColor : AppTheme.primaryColor,
                 ),
-
-                // Validate button (always available when not read-only)
-                if (widget.projectId.isNotEmpty)
-                  _buildActionButton(
-                    icon:
-                        _isValidating ? Icons.hourglass_empty : Icons.verified,
-                    label: _isValidating ? 'Validating...' : 'Validate',
-                    onPressed: _isValidating
-                        ? null
-                        : () => _validateYaml(_textController.text),
-                    color:
-                        _isValid ? AppTheme.validColor : AppTheme.warningColor,
-                  ),
               ],
             ),
         ],

@@ -345,147 +345,127 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         widget.validationTimestamps != null &&
         widget.validationTimestamps!.containsKey(node.filePath!);
 
+    // Check if this is an AI-generated file
+    bool isAIGenerated = node.filePath?.startsWith('ai_generated_') ?? false;
+
     // Get the icon based on node type
     IconData icon = _getNodeIcon(node.type);
     Color iconColor = _getNodeColor(node.type);
+
+    // Special styling for AI-generated files
+    if (isAIGenerated) {
+      iconColor = Color(0xFFEC4899); // Pink color for AI files
+      icon = Icons.auto_awesome; // AI icon
+    }
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          setState(() {
-            if (hasChildren) {
+          if (hasChildren) {
+            setState(() {
               if (isExpanded) {
                 _expandedNodes.remove(nodeIdentifier);
               } else {
                 _expandedNodes.add(nodeIdentifier);
               }
-            }
+            });
+          }
 
-            if (node.filePath != null) {
-              _selectedFilePath = node.filePath;
-              if (widget.onFileSelected != null) {
-                widget.onFileSelected!(node.filePath!);
-              }
-            }
-          });
+          // Always call file selection for leaf nodes or when clicking on files
+          if (node.filePath != null) {
+            widget.onFileSelected?.call(node.filePath!);
+          }
         },
-        hoverColor: AppTheme.primaryColor.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(4),
         child: Container(
-          padding: EdgeInsets.only(
-            left: 12.0 + (depth * 16.0),
-            right: 12.0,
-            top: 6.0,
-            bottom: 6.0,
-          ),
+          padding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
           decoration: BoxDecoration(
             color: isSelected
                 ? AppTheme.primaryColor.withOpacity(0.1)
                 : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
             border: isSelected
-                ? Border(
-                    left: BorderSide(
-                      color: AppTheme.primaryColor,
-                      width: 3,
-                    ),
-                  )
+                ? Border.all(color: AppTheme.primaryColor.withOpacity(0.3))
                 : null,
           ),
           child: Row(
             children: [
-              // Expansion indicator for folders
-              SizedBox(
-                width: 16,
-                height: 16,
-                child: hasChildren
-                    ? Icon(
-                        isExpanded
-                            ? Icons.keyboard_arrow_down_rounded
-                            : Icons.keyboard_arrow_right_rounded,
-                        size: 16,
-                        color: AppTheme.textSecondary,
-                      )
-                    : null,
-              ),
-              const SizedBox(width: 8),
+              // Indentation
+              SizedBox(width: depth * 16.0),
 
-              // Node icon
+              // Expand/collapse indicator for folders
+              if (hasChildren)
+                Icon(
+                  isExpanded
+                      ? Icons.keyboard_arrow_down
+                      : Icons.keyboard_arrow_right,
+                  size: 16,
+                  color: AppTheme.textSecondary,
+                )
+              else
+                SizedBox(width: 16),
+
+              const SizedBox(width: 4),
+
+              // File/folder icon
               Icon(
                 icon,
                 size: 16,
-                color: isSelected ? AppTheme.primaryColor : iconColor,
+                color: iconColor,
               ),
+
               const SizedBox(width: 8),
 
-              // Node name and status
+              // File/folder name
               Expanded(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        node.name,
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: isSelected
-                              ? AppTheme.primaryColor
-                              : AppTheme.textPrimary,
-                          fontWeight: isSelected || hasChildren
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                          fontSize: 13,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-
-                    // Status indicators
-                    if (isValidated) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration:
-                            AppTheme.statusBadgeDecoration(AppTheme.validColor),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.check_circle_outline,
-                              size: 10,
-                              color: AppTheme.validColor,
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              'Valid',
-                              style: AppTheme.captionSmall.copyWith(
-                                color: AppTheme.validColor,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-
-                    // Child count badge for folders
-                    if (hasChildren) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration:
-                            AppTheme.statusBadgeDecoration(AppTheme.textMuted),
-                        child: Text(
-                          '${node.children.length}',
-                          style: AppTheme.captionSmall.copyWith(
-                            color: AppTheme.textMuted,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+                child: Text(
+                  node.name,
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: isSelected
+                        ? AppTheme.primaryColor
+                        : AppTheme.textPrimary,
+                    fontWeight:
+                        isSelected ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+
+              // Status indicators
+              if (isAIGenerated)
+                Container(
+                  margin: EdgeInsets.only(left: 4),
+                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Color(0xFFEC4899).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(color: Color(0xFFEC4899), width: 1),
+                  ),
+                  child: Text(
+                    'AI',
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFEC4899),
+                    ),
+                  ),
+                )
+              else if (isValidated)
+                Container(
+                  margin: EdgeInsets.only(left: 4),
+                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppTheme.validColor.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(color: AppTheme.validColor, width: 1),
+                  ),
+                  child: Icon(
+                    Icons.verified,
+                    size: 10,
+                    color: AppTheme.validColor,
+                  ),
+                ),
             ],
           ),
         ),
