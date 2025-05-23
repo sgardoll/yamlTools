@@ -87,17 +87,10 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         return;
       }
 
-      // Extract file key from the file path
-      String fileKey = widget.filePath;
-      if (fileKey.contains('/')) {
-        fileKey = fileKey.split('/').last;
-      }
-      if (fileKey.endsWith('.yaml')) {
-        fileKey = fileKey.substring(0, fileKey.length - 5);
-      }
-      if (fileKey.startsWith('archive_')) {
-        fileKey = fileKey.substring(8);
-      }
+      // Extract file key from the file path using the same method as update
+      final fileKey = FlutterFlowApiService.getFileKey(widget.filePath);
+
+      print('Validating file: ${widget.filePath} -> key: "$fileKey"');
 
       // Create request payload
       final requestBody = json.encode({
@@ -176,6 +169,10 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       final apiToken = await PreferencesManager.getApiKey();
       if (apiToken == null || apiToken.isEmpty) {
         print('API token not found for update');
+        setState(() {
+          _validationError = 'API token not found for update';
+          _isValid = false;
+        });
         return;
       }
 
@@ -183,7 +180,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       final fileKey = FlutterFlowApiService.getFileKey(widget.filePath);
       final fileKeyToContent = {fileKey: content};
 
-      print('Updating file via API: ${widget.filePath} (key: $fileKey)');
+      print('Updating file via API: ${widget.filePath} -> key: "$fileKey"');
 
       // Call the FlutterFlow API
       await FlutterFlowApiService.updateProjectYaml(
@@ -194,14 +191,24 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
 
       print('Successfully updated file via API: ${widget.filePath}');
 
+      // Clear any previous errors on successful update
+      setState(() {
+        _validationError = null;
+        _isValid = true;
+      });
+
       // Notify that the file was updated via API
       if (widget.onFileUpdated != null) {
         widget.onFileUpdated!(widget.filePath);
       }
     } catch (e) {
       print('Error updating file via API: $e');
-      // We don't show UI errors here since this is automatic,
-      // the parent can handle error display through other means
+      // Show the update error in the UI
+      setState(() {
+        _validationError =
+            'Update failed: ${e.toString().contains('Invalid file key') ? 'Invalid file key for FlutterFlow' : 'Network error'}';
+        _isValid = false;
+      });
     } finally {
       setState(() {
         _isUpdating = false;
@@ -391,7 +398,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
               ),
             ),
 
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
 
           // Edit button (if not in read-only mode)
           if (!widget.isReadOnly && !_isEditing)
@@ -454,7 +461,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                           }
                         },
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 OutlinedButton(
                   child: const Text('Cancel'),
                   style: OutlinedButton.styleFrom(
@@ -481,6 +488,9 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                 ),
               ],
             ),
+
+          // Add spacing between edit buttons and copy button
+          if (_isEditing) const SizedBox(width: 16),
 
           // Copy button
           if (!_isEditing)
@@ -535,11 +545,13 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             },
       child: Container(
         padding: const EdgeInsets.all(16),
-        color: AppTheme.backgroundColor,
+        color: Colors.grey[50], // Light background for better readability
         child: SingleChildScrollView(
           child: Text(
             content,
-            style: AppTheme.monospace,
+            style: AppTheme.monospace.copyWith(
+              color: Colors.black87, // Dark text for visibility
+            ),
           ),
         ),
       ),
@@ -549,32 +561,34 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   Widget _buildEditor() {
     return Container(
       padding: const EdgeInsets.all(16),
-      color: AppTheme.backgroundColor,
+      color: Colors.grey[50], // Match the viewer background
       child: TextField(
         controller: _textController,
-        style: AppTheme.monospace,
+        style: AppTheme.monospace.copyWith(
+          color: Colors.black87, // Explicit dark text
+        ),
         maxLines: null,
         expands: true,
         keyboardType: TextInputType.multiline,
         textAlignVertical: TextAlignVertical.top,
         decoration: InputDecoration(
           filled: true,
-          fillColor: AppTheme.backgroundColor.withOpacity(0.7),
+          fillColor: Colors.white, // White background for the text field
           border: OutlineInputBorder(
-            borderSide: BorderSide(color: AppTheme.dividerColor),
+            borderSide: BorderSide(color: Colors.grey[400]!),
             borderRadius: BorderRadius.circular(4),
           ),
           enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: AppTheme.dividerColor),
+            borderSide: BorderSide(color: Colors.grey[400]!),
             borderRadius: BorderRadius.circular(4),
           ),
           focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: AppTheme.primaryColor),
+            borderSide: BorderSide(color: AppTheme.primaryColor, width: 2),
             borderRadius: BorderRadius.circular(4),
           ),
           contentPadding: const EdgeInsets.all(12),
           hintText: 'Enter YAML content...',
-          hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.textMuted),
+          hintStyle: TextStyle(color: Colors.grey[600]),
         ),
       ),
     );
