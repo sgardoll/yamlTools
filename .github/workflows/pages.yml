@@ -42,9 +42,14 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.19.0" # Updated to latest stable
+          flutter-version: "3.24.3" # Updated to latest stable that supports flutter_bootstrap.js
           channel: "stable"
           cache: true # Enable caching for faster builds
+
+      - name: Verify Flutter installation
+        run: |
+          flutter --version
+          flutter doctor -v
 
       - name: Enable web platform
         run: flutter config --enable-web
@@ -76,12 +81,40 @@ jobs:
       - name: Clean previous builds
         run: flutter clean
 
+      - name: Create flutter_bootstrap.js if missing
+        run: |
+          # For newer Flutter versions, we need to ensure flutter_bootstrap.js exists
+          if [ ! -f "web/flutter_bootstrap.js" ]; then
+            echo "Creating flutter_bootstrap.js for compatibility..."
+            cat > web/flutter_bootstrap.js << 'EOF'
+          (() => {
+            const serviceWorkerVersion = null;
+            const RESOURCES = {};
+            
+            // Flutter service worker registration
+            if ('serviceWorker' in navigator) {
+              window.addEventListener('flutter-first-frame', function () {
+                navigator.serviceWorker.register('flutter_service_worker.js');
+              });
+            }
+            
+            // Initialize the Flutter app
+            _flutter.loader.loadEntrypoint({
+              serviceWorker: {
+                serviceWorkerVersion: serviceWorkerVersion,
+              }
+            });
+          })();
+          EOF
+          fi
+
       - name: Build for Web (Release) - GitHub Pages Compatible
         run: |
           flutter build web \
             --release \
             --base-href "/yamlTools/" \
-            --web-renderer auto
+            --web-renderer canvaskit \
+            --pwa-strategy=offline-first
 
       - name: Fix GitHub Pages deployment issues
         run: |
@@ -93,9 +126,16 @@ jobs:
           # Create 404.html for SPA routing
           cp index.html 404.html
 
+          # Check if flutter_bootstrap.js was generated, if not copy from web directory
+          if [ ! -f "flutter_bootstrap.js" ] && [ -f "../../web/flutter_bootstrap.js" ]; then
+            echo "Copying flutter_bootstrap.js from web directory..."
+            cp ../../web/flutter_bootstrap.js .
+          fi
+
           # Verify critical files exist
           echo "🔍 Verifying build files:"
           ls -la main.dart.js flutter.js || echo "Some JS files missing"
+          ls -la flutter_bootstrap.js || echo "❌ flutter_bootstrap.js still missing"
           ls -la canvaskit/ || echo "Canvaskit directory missing"
 
           # Check if index.html is valid and show its content
