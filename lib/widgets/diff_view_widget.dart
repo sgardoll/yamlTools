@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../theme/app_theme.dart';
 
 class DiffViewWidget extends StatelessWidget {
   final String originalContent;
@@ -18,218 +19,243 @@ class DiffViewWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Generate the diff
-    final List<DiffLine> diffLines = _computeDiff(originalContent, modifiedContent);
+    final List<DiffLine> diffLines =
+        _computeDiff(originalContent, modifiedContent);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Header with filename and controls - only show if onClose is provided
-        // This avoids duplication when used inside the tree view
-        if (onClose != null)
-          Container(
-            color: Colors.grey[200],
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    fileName,
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppTheme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header with filename and controls
+          if (onClose != null)
+            Container(
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceColor,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(8),
+                  topRight: Radius.circular(8),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.copy),
-                  tooltip: 'Copy modified content',
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: modifiedContent));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Modified content copied to clipboard'),
-                        duration: Duration(seconds: 1),
+                border: Border(
+                  bottom: BorderSide(color: AppTheme.dividerColor),
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.compare_arrows,
+                      color: AppTheme.primaryColor, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Changes in $fileName',
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontWeight: FontWeight.w600,
                       ),
-                    );
-                  },
-                ),
-                if (onClose != null)
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   IconButton(
-                    icon: const Icon(Icons.close),
-                    padding: EdgeInsets.zero,
-                    constraints: BoxConstraints(),
+                    icon: const Icon(Icons.copy, size: 18),
+                    tooltip: 'Copy modified content',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: modifiedContent));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text(
+                              'Modified content copied to clipboard'),
+                          duration: const Duration(seconds: 2),
+                          backgroundColor: AppTheme.successColor,
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
                     onPressed: onClose,
                   ),
-              ],
+                ],
+              ),
             ),
-          ),
-        
-        // Diff header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Original',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  'Modified',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ],
-          ),
-        ),
 
-        // Diff content
-        Expanded(
-          child: diffLines.isEmpty
-              ? const Center(child: Text('No changes detected'))
-              : ListView.builder(
-                  itemCount: diffLines.length,
-                  itemBuilder: (context, index) {
-                    final diffLine = diffLines[index];
-                    return _buildDiffLine(diffLine);
-                  },
-                ),
-        ),
-      ],
+          // Diff content with improved readability
+          Expanded(
+            child: diffLines.isEmpty
+                ? Center(
+                    child: Text(
+                      'No changes detected',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(8),
+                    itemCount: diffLines.length,
+                    itemBuilder: (context, index) {
+                      final diffLine = diffLines[index];
+                      return _buildDiffLine(diffLine, index);
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildDiffLine(DiffLine line) {
+  Widget _buildDiffLine(DiffLine line, int lineNumber) {
     Color? backgroundColor;
-    Widget lineContent;
+    Color? textColor;
+    String prefix;
+    IconData? icon;
+    Color? iconColor;
 
     switch (line.type) {
       case DiffType.added:
         backgroundColor = Colors.green[50];
-        lineContent = Row(
-          children: [
-            // Empty space for the original side
-            Expanded(
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: BoxDecoration(
-                  border: Border(right: BorderSide(color: Colors.grey[300]!)),
-                ),
-              ),
-            ),
-            // Added content on the modified side
-            Expanded(
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                color: backgroundColor,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('+', style: TextStyle(color: Colors.green[800])),
-                    SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        line.content,
-                        style: TextStyle(fontFamily: 'monospace'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        );
+        textColor = Colors.green[900];
+        prefix = '+';
+        icon = Icons.add;
+        iconColor = Colors.green[700];
         break;
 
       case DiffType.removed:
         backgroundColor = Colors.red[50];
-        lineContent = Row(
-          children: [
-            // Removed content on the original side
-            Expanded(
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                color: backgroundColor,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('-', style: TextStyle(color: Colors.red[800])),
-                    SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        line.content,
-                        style: TextStyle(fontFamily: 'monospace'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // Empty space for the modified side
-            Expanded(
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: BoxDecoration(
-                  border: Border(left: BorderSide(color: Colors.grey[300]!)),
-                ),
-              ),
-            ),
-          ],
-        );
+        textColor = Colors.red[900];
+        prefix = '-';
+        icon = Icons.remove;
+        iconColor = Colors.red[700];
         break;
 
       case DiffType.unchanged:
-        backgroundColor = null;
-        lineContent = Row(
+        backgroundColor = Colors.transparent;
+        textColor = AppTheme.textSecondary;
+        prefix = ' ';
+        icon = null;
+        iconColor = null;
+        break;
+    }
+
+    // Skip displaying too many unchanged lines to reduce clutter
+    if (line.type == DiffType.unchanged) {
+      // Show a limited number of context lines around changes
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Same content on both sides
-            Expanded(
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Text(
-                  line.content,
-                  style: TextStyle(fontFamily: 'monospace', color: Colors.grey[700]),
+            Container(
+              width: 40,
+              child: Text(
+                '${lineNumber + 1}',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textMuted,
+                  fontFamily: 'monospace',
                 ),
+                textAlign: TextAlign.right,
               ),
             ),
+            const SizedBox(width: 12),
+            Container(
+              width: 20,
+              child: Text(
+                prefix,
+                style: AppTheme.bodyMedium.copyWith(
+                  color: textColor,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(width: 8),
             Expanded(
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Text(
-                  line.content,
-                  style: TextStyle(fontFamily: 'monospace', color: Colors.grey[700]),
+              child: Text(
+                line.content.isEmpty ? ' ' : line.content,
+                style: AppTheme.monospace.copyWith(
+                  color: textColor,
+                  fontSize: 13,
+                  height: 1.4,
                 ),
               ),
             ),
           ],
-        );
-        break;
+        ),
+      );
     }
 
+    // For added/removed lines, use more prominent styling
     return Container(
+      margin: const EdgeInsets.symmetric(vertical: 1),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
         color: backgroundColor,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: iconColor?.withOpacity(0.3) ?? Colors.transparent,
+          width: 1,
+        ),
       ),
-      child: lineContent,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              child: Text(
+                '${lineNumber + 1}',
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.textMuted,
+                  fontFamily: 'monospace',
+                ),
+                textAlign: TextAlign.right,
+              ),
+            ),
+            const SizedBox(width: 12),
+            if (icon != null)
+              Icon(
+                icon,
+                size: 16,
+                color: iconColor,
+              )
+            else
+              Container(width: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                line.content.isEmpty ? ' ' : line.content,
+                style: AppTheme.monospace.copyWith(
+                  color: textColor,
+                  fontSize: 14,
+                  height: 1.4,
+                  fontWeight: line.type != DiffType.unchanged
+                      ? FontWeight.w500
+                      : FontWeight.normal,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   // Compute the diff between original and modified content
   List<DiffLine> _computeDiff(String original, String modified) {
     final List<DiffLine> result = [];
-    
+
     // Split content into lines
     final List<String> originalLines = original.split('\n');
     final List<String> modifiedLines = modified.split('\n');
 
-    // Simple implementation of diff calculation (can be improved with a better algorithm)
+    // Simple implementation of diff calculation
     int i = 0, j = 0;
-    
+
     while (i < originalLines.length || j < modifiedLines.length) {
       // If we've reached the end of original content, all remaining lines are additions
       if (i >= originalLines.length) {
@@ -239,7 +265,7 @@ class DiffViewWidget extends StatelessWidget {
         }
         break;
       }
-      
+
       // If we've reached the end of modified content, all remaining lines are removals
       if (j >= modifiedLines.length) {
         while (i < originalLines.length) {
@@ -248,7 +274,7 @@ class DiffViewWidget extends StatelessWidget {
         }
         break;
       }
-      
+
       // If lines are the same, add as unchanged and advance both counters
       if (originalLines[i] == modifiedLines[j]) {
         result.add(DiffLine(originalLines[i], DiffType.unchanged));
@@ -257,9 +283,9 @@ class DiffViewWidget extends StatelessWidget {
       } else {
         // Look ahead to see if this is just an addition or removal
         bool found = false;
-        
+
         // Check if current original line appears later in modified content
-        for (int k = j + 1; k < modifiedLines.length && k < j + 5; k++) {
+        for (int k = j + 1; k < modifiedLines.length && k < j + 3; k++) {
           if (originalLines[i] == modifiedLines[k]) {
             // Lines between j and k are additions
             for (int l = j; l < k; l++) {
@@ -270,10 +296,10 @@ class DiffViewWidget extends StatelessWidget {
             break;
           }
         }
-        
+
         if (!found) {
           // Check if current modified line appears later in original content
-          for (int k = i + 1; k < originalLines.length && k < i + 5; k++) {
+          for (int k = i + 1; k < originalLines.length && k < i + 3; k++) {
             if (originalLines[k] == modifiedLines[j]) {
               // Lines between i and k are removals
               for (int l = i; l < k; l++) {
@@ -285,7 +311,7 @@ class DiffViewWidget extends StatelessWidget {
             }
           }
         }
-        
+
         // If we couldn't find a match looking ahead, treat as a modified line (remove and add)
         if (!found) {
           result.add(DiffLine(originalLines[i], DiffType.removed));
@@ -295,7 +321,7 @@ class DiffViewWidget extends StatelessWidget {
         }
       }
     }
-    
+
     return result;
   }
 }
@@ -304,7 +330,7 @@ class DiffViewWidget extends StatelessWidget {
 class DiffLine {
   final String content;
   final DiffType type;
-  
+
   DiffLine(this.content, this.type);
 }
 
@@ -313,4 +339,4 @@ enum DiffType {
   added,
   removed,
   unchanged,
-} 
+}

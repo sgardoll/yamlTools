@@ -9,10 +9,20 @@ import '../storage/preferences_manager.dart';
 import '../widgets/recent_projects_widget.dart';
 import '../widgets/yaml_tree_view.dart'; // Import our new tree view widget
 import '../widgets/diff_view_widget.dart'; // Import our diff view widget
-
-// Import web-specific functionality with fallback
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as web; // This will only compile on web
+import '../widgets/app_header.dart';
+import '../widgets/project_header.dart';
+import '../widgets/yaml_content_viewer.dart';
+import '../widgets/modern_yaml_tree.dart';
+import '../widgets/ai_assist_panel.dart'; // Import the new AI Assist panel
+import '../services/flutterflow_api_service.dart'; // Import FlutterFlow API service
+import '../theme/app_theme.dart';
+// import '../services/validation_service.dart'; // File doesn't exist
+// import '../services/yaml_service.dart'; // File doesn't exist
+// import '../services/yaml_comparison_service.dart'; // File doesn't exist
+// import '../widgets/export_files_view.dart'; // File doesn't exist
+// Import web-specific functionality conditionally
+import '../web_file_download.dart'
+    if (dart.library.io) '../no_op_file_download.dart' as file_download;
 
 // We're not using conditional imports
 
@@ -37,6 +47,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, TextEditingController> _fileControllers =
       {}; // For editing YAML files
   Map<String, bool> _fileEditModes = {}; // Track which files are in edit mode
+  Map<String, DateTime> _fileValidationTimestamps =
+      {}; // Track when files were validated successfully
+  Map<String, DateTime> _fileUpdateTimestamps =
+      {}; // Track when files were updated/saved locally
+  Map<String, DateTime> _fileSyncTimestamps =
+      {}; // Track when files were successfully synced to FlutterFlow
 
   bool _showExportView = true; // Default to export view
   bool _isOutputExpanded = false; // For expandable output section
@@ -44,6 +60,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showRecentProjects = false; // Whether to show recent projects panel
   bool _collapseCredentials =
       false; // Whether to collapse credentials after fetch
+
+  // New state variable for AI Assist panel
+  bool _showAIAssist = false;
 
   // Track which files are expanded
   Set<String> _expandedFiles = {};
@@ -60,6 +79,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Add a new state field for loading indicator
   bool _isLoading = false;
+
+  // Add a new state field for selected file path
+  String? _selectedFilePath;
 
   // Helper to convert bytes to hex
   String _bytesToHexString(List<int> bytes) {
@@ -221,15 +243,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Handle selecting a project from recent projects list
-  void _handleProjectSelected(String projectId) {
+  void _handleProjectSelected(String projectId) async {
+    // Load the saved API token
+    final savedApiToken = await PreferencesManager.getApiKey();
+
     setState(() {
       _projectIdController.text = projectId;
+      if (savedApiToken != null && savedApiToken.isNotEmpty) {
+        _apiTokenController.text = savedApiToken;
+      }
       _showRecentProjects = false;
     });
   }
 
   // Apply changes to a file and update modification tracking
-  void _applyFileChanges(String fileName, String newContent) {
+  Future<void> _applyFileChanges(String fileName, String newContent) async {
     // Only update if content has actually changed
     if (_exportedFiles[fileName] != newContent) {
       setState(() {
@@ -243,11 +271,20 @@ class _HomeScreenState extends State<HomeScreen> {
         _changedFiles[fileName] = newContent;
         _hasModifications = true;
 
+        // Track validation timestamp when file is saved
+        _fileValidationTimestamps[fileName] = DateTime.now();
+
+        // Track update timestamp when file is saved
+        _fileUpdateTimestamps[fileName] = DateTime.now();
+
         // Update the message to indicate a manual edit was made
         _operationMessage = 'File "$fileName" manually edited.';
         _generatedYamlMessage =
             '$_operationMessage\n\nThe file has been updated.';
       });
+
+      // Note: API update is now handled automatically by YamlContentViewer
+      // after successful validation
     }
   }
 
@@ -286,6 +323,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _changedFiles.clear();
       _fileControllers.clear(); // Clear any existing file editors
       _fileEditModes.clear();
+      _fileValidationTimestamps.clear(); // Clear validation timestamps
+      _fileUpdateTimestamps.clear(); // Clear update timestamps
+      _fileSyncTimestamps.clear(); // Clear sync timestamps
       _hasModifications = false; // Reset modification state for fresh fetch
       _expandedFiles.clear(); // Clear expanded files state
       _collapseCredentials = true; // Collapse credentials after fetch
@@ -295,15 +335,24 @@ class _HomeScreenState extends State<HomeScreen> {
     List<int>? decodedZipBytes;
 
     try {
-      final Uri uri = Uri.parse(
-          'https://api.flutterflow.io/v2/projectYamls?projectId=$projectId');
+      final apiUrl =
+          'https://api.flutterflow.io/v2-staging/projectYamls?projectId=$projectId';
+      print('Fetching YAML from: $apiUrl');
+
       final response = await http.get(
-        uri,
+        Uri.parse(apiUrl),
         headers: {
           'Authorization': 'Bearer $apiToken',
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          // Add cache control to prevent caching issues
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
         },
       );
+
+      print('YAML fetch response status: ${response.statusCode}');
+
       final String? contentLengthHeader = response.headers['content-length'];
       print(
           'DEBUG_LOG: API Response Header Content-Length: $contentLengthHeader');
@@ -683,327 +732,119 @@ class _HomeScreenState extends State<HomeScreen> {
         _apiTokenController.text.isNotEmpty;
     bool hasYaml = _exportedFiles.isNotEmpty || _parsedYamlMap != null;
 
+    String projectDisplayName = _projectIdController.text.isNotEmpty
+        ? (_projectName.isNotEmpty ? _projectName : _projectIdController.text)
+        : "No Project Loaded";
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text('FlutterFlow YAML Tools'),
-        actions: [
-          if (hasYaml)
-            IconButton(
-              icon: Icon(Icons.refresh, color: Colors.blue),
-              tooltip: 'Reload YAML',
-              onPressed: hasCredentials ? _fetchProjectYaml : null,
-            ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      backgroundColor: AppTheme.backgroundColor,
+      body: SafeArea(
+        child: Row(
           children: [
-            // Recent Projects Panel (conditionally shown)
-            if (_showRecentProjects)
-              Expanded(
-                child: Card(
-                  elevation: 4,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Recent Projects',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close, color: Colors.grey),
-                              onPressed: () {
-                                setState(() {
-                                  _showRecentProjects = false;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                        const Divider(),
-                        Expanded(
-                          child: RecentProjectsWidget(
-                            onProjectSelected: _handleProjectSelected,
-                            showHeader: false, // Don't show duplicate header
-                          ),
-                        ),
-                      ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Custom app header
+                  AppHeader(
+                    onNewProject: _handleNewProject,
+                    onRecent: _handleRecentProjects,
+                    onReload: hasCredentials ? _fetchProjectYaml : null,
+                    onAIAssist: _handleAIAssist,
+                  ),
+
+                  // Project header if we have YAML loaded
+                  if (hasYaml)
+                    ProjectHeader(
+                      projectName: projectDisplayName,
+                      viewMode: _selectedViewIndex == 0
+                          ? 'edited_files'
+                          : 'tree_view',
+                      onViewModeChanged: (mode) {
+                        setState(() {
+                          _selectedViewIndex = mode == 'edited_files' ? 0 : 1;
+                        });
+                      },
                     ),
-                  ),
-                ),
-              )
-            else if (_collapseCredentials && hasYaml)
-              // Collapsed Credentials (Small button to expand)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0, vertical: 8.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Icon(Icons.account_circle, color: Colors.blue),
-                            SizedBox(width: 8),
-                            Text(
-                              'Project: ${_projectIdController.text}',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Add system file buttons here
-                      if (_exportedFiles.keys
-                          .any((f) => f.contains('complete_raw.yaml')))
-                        _buildTopBarSystemFileButton(
-                          'complete_raw.yaml',
-                          _exportedFiles.keys.firstWhere(
-                              (f) => f.contains('complete_raw.yaml')),
-                        ),
-                      if (_exportedFiles.keys
-                          .any((f) => f.contains('raw_project.yaml')))
-                        _buildTopBarSystemFileButton(
-                          'raw_project.yaml',
-                          _exportedFiles.keys.firstWhere(
-                              (f) => f.contains('raw_project.yaml')),
-                        ),
-                      SizedBox(width: 8),
-                      Row(
-                        children: [
-                          ElevatedButton.icon(
-                            icon: Icon(
-                              Icons.edit,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              'Edit',
-                              style: TextStyle(
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              elevation: 3,
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: Size(0, 32),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _collapseCredentials = false;
-                              });
-                            },
-                          ),
-                          SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            icon: Icon(
-                              Icons.history,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              'Recent',
-                              style: TextStyle(
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              elevation: 3,
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: Size(0, 32),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _showRecentProjects = true;
-                              });
-                            },
-                          ),
-                          SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            icon: Icon(
-                              Icons.refresh,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              'Reload',
-                              style: TextStyle(
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              elevation: 3,
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: Size(0, 32),
-                            ),
-                            onPressed:
-                                hasCredentials ? _fetchProjectYaml : null,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              // Authentication Section (Full form)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('FlutterFlow Credentials',
-                              style: TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold)),
-                          ElevatedButton.icon(
-                            icon: Icon(
-                              Icons.history,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              'Recent',
-                              style: TextStyle(
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              elevation: 3,
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: Size(0, 32),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _showRecentProjects = true;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 8),
-                      TextField(
-                          controller: _projectIdController,
-                          decoration: InputDecoration(labelText: 'Project ID')),
-                      TextField(
-                          controller: _apiTokenController,
-                          obscureText: true,
-                          decoration: InputDecoration(labelText: 'API Token')),
-                      SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: hasCredentials && !_isLoading
-                                  ? _fetchProjectYaml
-                                  : null,
-                              child: _isLoading
-                                  ? Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white,
-                                          ),
+
+                  // Main content area
+                  Expanded(
+                    child: !hasYaml
+                        ? _buildLoadProjectUI()
+                        : Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // Left panel - Tree or Files list
+                                Expanded(
+                                  flex: 2,
+                                  child: _selectedViewIndex == 0
+                                      ? _buildExportFilesView()
+                                      : ModernYamlTree(
+                                          yamlFiles: _exportedFiles,
+                                          onFileSelected: (filePath) {
+                                            setState(() {
+                                              _selectedFilePath = filePath;
+                                            });
+                                          },
+                                          expandedNodes: _expandedFiles,
+                                          validationTimestamps:
+                                              _fileValidationTimestamps,
                                         ),
-                                        SizedBox(width: 8),
-                                        Text('Fetching...'),
-                                      ],
-                                    )
-                                  : Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.download,
-                                            color: Colors.white),
-                                        SizedBox(width: 8),
-                                        Text('Fetch YAML'),
-                                      ],
-                                    ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                foregroundColor: Colors.white,
-                              ),
+                                ),
+
+                                const SizedBox(width: 16),
+
+                                // Right panel - YAML Content
+                                Expanded(
+                                  flex: 3,
+                                  child: YamlContentViewer(
+                                    content: _selectedFilePath != null
+                                        ? _exportedFiles[_selectedFilePath]
+                                        : _rawFetchedYaml,
+                                    characterCount: _selectedFilePath != null
+                                        ? _exportedFiles[_selectedFilePath]
+                                            ?.length
+                                        : _rawFetchedYaml?.length,
+                                    isReadOnly: false,
+                                    filePath: _selectedFilePath ?? '',
+                                    projectId: _projectIdController.text,
+                                    onContentChanged: _selectedFilePath != null
+                                        ? (content) async {
+                                            await _applyFileChanges(
+                                                _selectedFilePath!, content);
+                                          }
+                                        : null,
+                                    onFileUpdated: _selectedFilePath != null
+                                        ? (filePath) {
+                                            // Update sync timestamp when file is successfully updated via API
+                                            setState(() {
+                                              _fileSyncTimestamps[
+                                                      _selectedFilePath!] =
+                                                  DateTime.now();
+                                              _operationMessage =
+                                                  'File "$_selectedFilePath" saved and synced to FlutterFlow.';
+                                              _generatedYamlMessage =
+                                                  '$_operationMessage\n\nThe file has been updated in your FlutterFlow project.';
+                                            });
+                                          }
+                                        : null,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          if (hasYaml) ...[
-                            SizedBox(width: 8),
-                            IconButton(
-                              icon: Icon(Icons.arrow_upward),
-                              tooltip: 'Collapse',
-                              onPressed: () {
-                                setState(() {
-                                  _collapseCredentials = true;
-                                });
-                              },
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
                   ),
-                ),
+                ],
               ),
-
-            // Add view selection UI when files are available
-            if (_exportedFiles.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16.0),
-                child: Row(
-                  children: [
-                    Text('View Mode: ',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    SizedBox(width: 8),
-                    ChoiceChip(
-                      label: Text('Edited Files'),
-                      selected: _selectedViewIndex == 0,
-                      onSelected: (selected) {
-                        if (selected) setState(() => _selectedViewIndex = 0);
-                      },
-                    ),
-                    SizedBox(width: 8),
-                    ChoiceChip(
-                      label: Text('Tree View'),
-                      selected: _selectedViewIndex == 1,
-                      onSelected: (selected) {
-                        if (selected) setState(() => _selectedViewIndex = 1);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-
-            // Files display section
-            if (hasYaml)
-              Expanded(
-                child: _selectedViewIndex == 0
-                    ? _buildExportFilesView() // Show edited files view
-                    : _buildTreeView(), // Show tree view with integrated file editor
+            ),
+            // Add AI Assist panel
+            if (_showAIAssist)
+              AIAssistPanel(
+                onUpdateYaml: _updateYamlFromAI,
+                currentFiles: _exportedFiles,
+                onClose: _handleAIAssist,
               ),
           ],
         ),
@@ -1011,264 +852,239 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // New method to build the tree view
-  Widget _buildTreeView() {
-    return YamlTreeView(
-      yamlFiles: _exportedFiles,
-      onFileEdited: (String filePath, String newContent) {
-        // When a file is edited in the tree view, update it
-        _applyFileChanges(filePath, newContent);
-      },
-      originalFiles: _originalFiles,
-      expandedFiles: _expandedFiles, // Pass the expanded files set
-    );
-  }
+  // Widget to display when no project is loaded
+  Widget _buildLoadProjectUI() {
+    // Determine if we have credentials filled in
+    bool hasCredentials = _projectIdController.text.isNotEmpty &&
+        _apiTokenController.text.isNotEmpty;
 
-  // Existing method renamed for clarity
-  Widget _buildFlatFileListView() {
-    // Use changedFiles if modifications were made, otherwise use exportedFiles
-    Map<String, String> filesToShow =
-        _hasModifications ? _changedFiles : _exportedFiles;
-
-    // Filter out system files that we're now showing in the top bar
-    Map<String, String> filteredFiles = Map.from(filesToShow);
-    filteredFiles.removeWhere((key, value) =>
-        key.contains('complete_raw.yaml') || key.contains('raw_project.yaml'));
-
-    // Make sure our key files are shown first
-    List<String> orderedKeys = filteredFiles.keys.toList();
-
-    // Add modified_yaml.yaml first if it exists
-    if (_hasModifications) {
-      orderedKeys.sort((a, b) {
-        // Give priority to the modified_yaml.yaml file
-        if (a == 'modified_yaml.yaml') return -1;
-        if (b == 'modified_yaml.yaml') return 1;
-        if (a == 'raw_output.yaml') return -1;
-        if (b == 'raw_output.yaml') return 1;
-        return a.compareTo(b);
-      });
-    } else {
-      orderedKeys.sort((a, b) {
-        // Show archive files first
-        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
-        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
-        return a.compareTo(b);
-      });
-    }
-
-    // Count modified files for the badge
-    int modifiedFilesCount = 0;
-    for (var fileName in orderedKeys) {
-      String content = filesToShow[fileName] ?? '';
-
-      // Check if file is modified
-      if (_originalFiles.containsKey(fileName) &&
-          _originalFiles[fileName] != content) {
-        modifiedFilesCount++;
-      }
-    }
-
-    String statusMessage = "Found ${orderedKeys.length} files";
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Text(statusMessage),
-        ),
-        Expanded(
-          child: filesToShow.isEmpty
-              ? Center(
-                  child: Text(
-                      'No YAML files available. ${_parsedYamlMap != null ? "Enter a prompt to make changes." : ""}'),
-                )
-              : ListView.builder(
-                  itemCount: orderedKeys.length,
-                  itemBuilder: (context, index) {
-                    String fileName = orderedKeys[index];
-
-                    // Skip compact treatment for system files since they're now in the top bar
-                    // if (fileName.contains('complete_raw.yaml') ||
-                    //     fileName.contains('raw_project.yaml')) {
-                    //   return _buildCompactFileCard(
-                    //       fileName, filesToShow[fileName] ?? '');
-                    // }
-
-                    String fileContent = filesToShow[fileName] ?? '';
-                    bool isExpanded = _expandedFiles.contains(fileName);
-
-                    // Debug file sizes
-                    print(
-                        'DEBUG: File "$fileName" size: ${fileContent.length} chars');
-
-                    // Determine if file was deleted
-                    bool isDeleted = fileContent ==
-                        "# This file was removed in the latest changes";
-
-                    // Highlight the complete raw file
-                    bool isCompleteRaw = fileName.contains('complete_raw.yaml');
-
-                    // Highlight archive files
-                    bool isArchiveFile = fileName.startsWith('archive_');
-
-                    // Prepare or get a TextEditingController for this file if needed
-                    if (!_fileControllers.containsKey(fileName)) {
-                      _fileControllers[fileName] =
-                          TextEditingController(text: fileContent);
-                    }
-
-                    bool isEditing = _fileEditModes[fileName] == true;
-                    bool wasModified = _originalFiles.containsKey(fileName) &&
-                        _originalFiles[fileName] != fileContent;
-
-                    // Get background color based on file type and modified status
-                    Color? bgColor;
-
-                    if (wasModified) {
-                      bgColor = Colors.yellow[50]; // Highlight modified files
-                    } else if (isCompleteRaw) {
-                      bgColor = Colors.blue[50]; // Highlight complete raw file
-                    } else if (isArchiveFile) {
-                      bgColor =
-                          Colors.grey[50]; // Subtle highlight for archive files
-                    }
-
-                    return Card(
-                      color: bgColor,
-                      margin: EdgeInsets.all(4.0),
-                      child: ExpansionTile(
-                        key: Key(
-                            fileName), // Use a key to maintain expansion state
-                        initiallyExpanded: isExpanded,
-                        onExpansionChanged: (expanded) {
-                          setState(() {
-                            if (expanded) {
-                              _expandedFiles.add(fileName);
-                            } else {
-                              _expandedFiles.remove(fileName);
-                            }
-                          });
-                        },
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                fileName,
-                                style: TextStyle(
-                                  fontWeight: wasModified || isCompleteRaw
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                            ),
-                            if (wasModified)
-                              Chip(
-                                label: Text('Modified'),
-                                backgroundColor: Colors.yellow[100],
-                                labelStyle: TextStyle(fontSize: 10),
-                                padding: EdgeInsets.zero,
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                              ),
-                          ],
+    return Container(
+      color: AppTheme.backgroundColor,
+      child: Center(
+        child: SingleChildScrollView(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 600),
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
+            decoration: AppTheme.cardDecoration,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Header section
+                Column(
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF4F46E5), Color(0xFF3B82F6)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                        subtitle: Text(
-                          '${fileContent.length} characters',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: isEditing
-                                ? Column(
-                                    children: [
-                                      TextField(
-                                        controller: _fileControllers[fileName],
-                                        maxLines: null,
-                                        decoration: InputDecoration(
-                                          border: OutlineInputBorder(),
-                                          filled: true,
-                                          fillColor: Colors.white,
-                                        ),
-                                        style:
-                                            TextStyle(fontFamily: 'monospace'),
-                                      ),
-                                      SizedBox(height: 8),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceEvenly,
-                                        children: [
-                                          ElevatedButton.icon(
-                                            icon: Icon(Icons.save,
-                                                size: 16, color: Colors.white),
-                                            label: Text('Save'),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.green,
-                                              foregroundColor: Colors.white,
-                                            ),
-                                            onPressed: () {
-                                              _applyFileChanges(
-                                                  fileName,
-                                                  _fileControllers[fileName]!
-                                                      .text);
-                                              setState(() {
-                                                _fileEditModes[fileName] =
-                                                    false;
-                                              });
-                                            },
-                                          ),
-                                          TextButton.icon(
-                                            icon: Icon(Icons.cancel,
-                                                size: 16, color: Colors.red),
-                                            label: Text('Cancel'),
-                                            style: TextButton.styleFrom(
-                                              foregroundColor: Colors.red,
-                                            ),
-                                            onPressed: () {
-                                              setState(() {
-                                                _fileEditModes[fileName] =
-                                                    false;
-                                                _fileControllers[fileName]!
-                                                        .text =
-                                                    filesToShow[fileName] ?? '';
-                                              });
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  )
-                                : GestureDetector(
-                                    onTap: () {
-                                      // Enter edit mode when text is clicked
-                                      setState(() {
-                                        _fileEditModes[fileName] = true;
-                                        _fileControllers[fileName]!.text =
-                                            fileContent;
-                                      });
-                                    },
-                                    child: Container(
-                                      color: Colors
-                                          .transparent, // Makes the entire area tappable
-                                      width: double.infinity,
-                                      child: SingleChildScrollView(
-                                        child: Text(
-                                          fileContent,
-                                          style: TextStyle(
-                                              fontFamily: 'monospace'),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primaryColor.withOpacity(0.2),
+                            offset: Offset(0, 4),
+                            blurRadius: 8,
                           ),
                         ],
                       ),
-                    );
-                  },
+                      child: Stack(
+                        children: [
+                          // FlutterFlow-style logo design
+                          Positioned(
+                            top: 12,
+                            left: 12,
+                            child: Container(
+                              width: 16,
+                              height: 16,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.9),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 20,
+                            left: 32,
+                            child: Container(
+                              width: 20,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.7),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 36,
+                            left: 16,
+                            child: Container(
+                              width: 32,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.8),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                          // Central "F" for FlutterFlow
+                          Center(
+                            child: Text(
+                              'F',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Load FlutterFlow Project',
+                      style: AppTheme.headingLarge.copyWith(fontSize: 28),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Enter your project credentials to get started',
+                      style: AppTheme.bodyLarge.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 32),
+
+                // Form section
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Project ID field
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Project ID',
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _projectIdController,
+                          decoration: AppTheme.inputDecoration(
+                            hintText: 'Enter your FlutterFlow project ID',
+                            prefixIcon: const Icon(Icons.folder_outlined),
+                          ),
+                          style: AppTheme.bodyMedium,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // API Token field
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'API Token',
+                          style: AppTheme.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _apiTokenController,
+                          decoration: AppTheme.inputDecoration(
+                            hintText: 'Enter your FlutterFlow API token',
+                            prefixIcon: const Icon(Icons.key),
+                          ),
+                          style: AppTheme.bodyMedium,
+                          obscureText: true,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 28),
+
+                    // Fetch button
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: hasCredentials && !_isLoading
+                            ? _fetchProjectYaml
+                            : null,
+                        icon: _isLoading
+                            ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white),
+                                ),
+                              )
+                            : const Icon(Icons.download, size: 18),
+                        label: Text(_isLoading ? 'Loading...' : 'Fetch YAML'),
+                        style: AppTheme.primaryButtonStyle.copyWith(
+                          minimumSize: MaterialStateProperty.all(
+                              Size(double.infinity, 48)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 32),
+
+                // Recent projects section
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.history,
+                          size: 18,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Recent Projects',
+                          style: AppTheme.headingSmall.copyWith(fontSize: 16),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      height: 180, // Reduced height to prevent overflow
+                      decoration: BoxDecoration(
+                        color: AppTheme.backgroundColor,
+                        borderRadius: BorderRadius.circular(8),
+                        border:
+                            Border.all(color: AppTheme.dividerColor, width: 1),
+                      ),
+                      child: RecentProjectsWidget(
+                        onProjectSelected: _handleProjectSelected,
+                        showHeader: false,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
-      ],
+      ),
     );
   }
 
@@ -1289,6 +1105,22 @@ class _HomeScreenState extends State<HomeScreen> {
     // Add modified_yaml.yaml first if it exists
     if (_hasModifications) {
       orderedKeys.sort((a, b) {
+        // First check if files have validation timestamps - recently validated files go to top
+        DateTime? timestampA = _fileValidationTimestamps[a];
+        DateTime? timestampB = _fileValidationTimestamps[b];
+
+        if (timestampA != null && timestampB != null) {
+          // Both have timestamps, sort by most recent first
+          return timestampB.compareTo(timestampA);
+        } else if (timestampA != null) {
+          // Only A has timestamp, it goes first
+          return -1;
+        } else if (timestampB != null) {
+          // Only B has timestamp, it goes first
+          return 1;
+        }
+
+        // Neither has timestamp, fall back to original priority logic
         // Give priority to the modified_yaml.yaml file
         if (a == 'modified_yaml.yaml') return -1;
         if (b == 'modified_yaml.yaml') return 1;
@@ -1349,10 +1181,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
               ],
             ),
-            SizedBox(width: 8),
+            SizedBox(width: 16),
             Text(statusMessage,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-            Spacer(),
           ],
         ),
         SizedBox(height: 8),
@@ -1497,6 +1328,163 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     color: Colors.amber[800],
                                                   ),
                                                 ),
+                                              // Show the most recent status indicator only
+                                              // Priority: Synced > Updated > Valid
+                                              if (_fileSyncTimestamps
+                                                  .containsKey(fileName))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 4.0),
+                                                  child: Tooltip(
+                                                    message:
+                                                        'Recently synced to FlutterFlow',
+                                                    child: Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 4,
+                                                              vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color:
+                                                            Colors.purple[100],
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        border: Border.all(
+                                                            color: Colors
+                                                                .purple[300]!,
+                                                            width: 1),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.cloud_done,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .purple[700],
+                                                          ),
+                                                          SizedBox(width: 2),
+                                                          Text(
+                                                            'Synced',
+                                                            style: TextStyle(
+                                                              fontSize: 9,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .purple[800],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                )
+                                              else if (_fileUpdateTimestamps
+                                                  .containsKey(fileName))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 4.0),
+                                                  child: Tooltip(
+                                                    message:
+                                                        'Recently updated locally',
+                                                    child: Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 4,
+                                                              vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.blue[100],
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        border: Border.all(
+                                                            color: Colors
+                                                                .blue[300]!,
+                                                            width: 1),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.edit,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .blue[700],
+                                                          ),
+                                                          SizedBox(width: 2),
+                                                          Text(
+                                                            'Updated',
+                                                            style: TextStyle(
+                                                              fontSize: 9,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .blue[800],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                )
+                                              else if (_fileValidationTimestamps
+                                                  .containsKey(fileName))
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          left: 4.0),
+                                                  child: Tooltip(
+                                                    message:
+                                                        'Recently validated',
+                                                    child: Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                              horizontal: 4,
+                                                              vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color:
+                                                            Colors.green[100],
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                        border: Border.all(
+                                                            color: Colors
+                                                                .green[300]!,
+                                                            width: 1),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.verified,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .green[700],
+                                                          ),
+                                                          SizedBox(width: 2),
+                                                          Text(
+                                                            'Valid',
+                                                            style: TextStyle(
+                                                              fontSize: 9,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color: Colors
+                                                                  .green[800],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
                                             ],
                                           ),
                                         ),
@@ -1509,16 +1497,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                       if (isExpanded)
                                         isEditing
                                             ? ElevatedButton.icon(
-                                                icon: Icon(Icons.save,
-                                                    size: 16,
-                                                    color: Colors.white),
-                                                label: Text('Save'),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.green,
-                                                  foregroundColor: Colors.white,
-                                                ),
-                                                onPressed: () {
-                                                  _applyFileChanges(
+                                                icon: const Icon(Icons.save,
+                                                    size: 14),
+                                                label: const Text('Save'),
+                                                style: _getFileButtonStyle(
+                                                    backgroundColor:
+                                                        AppTheme.successColor),
+                                                onPressed: () async {
+                                                  await _applyFileChanges(
                                                       fileName,
                                                       _fileControllers[
                                                               fileName]!
@@ -1530,26 +1516,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 },
                                               )
                                             : ElevatedButton.icon(
-                                                icon: Icon(
-                                                  Icons.edit,
-                                                  size: 16,
-                                                  color: Colors.white,
-                                                ),
-                                                label: Text(
-                                                  'Edit',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.blue,
-                                                  foregroundColor: Colors.white,
-                                                  elevation: 3,
-                                                  padding: EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 0),
-                                                  minimumSize: Size(0, 32),
-                                                ),
+                                                icon: const Icon(Icons.edit,
+                                                    size: 14),
+                                                label: const Text('Edit'),
+                                                style: _getFileButtonStyle(
+                                                    backgroundColor:
+                                                        AppTheme.primaryColor),
                                                 onPressed: () {
                                                   // Enter edit mode
                                                   setState(() {
@@ -1562,36 +1534,23 @@ class _HomeScreenState extends State<HomeScreen> {
                                               ),
                                       // Copy button
                                       ElevatedButton.icon(
-                                        icon: Icon(Icons.copy,
-                                            size: 16, color: Colors.white),
-                                        label: Text('Copy',
-                                            style: TextStyle(fontSize: 12)),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.blue,
-                                          foregroundColor: Colors.white,
-                                          padding: EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 0),
-                                          minimumSize: Size(0, 32),
-                                        ),
+                                        icon: const Icon(Icons.copy, size: 14),
+                                        label: const Text('Copy'),
+                                        style: _getFileButtonStyle(),
                                         onPressed: () {
                                           _fallbackClipboardCopy(
                                               context, fileName, fileContent);
                                         },
                                       ),
-                                      SizedBox(width: 8),
+                                      const SizedBox(width: 8),
                                       // Make View button more prominent
                                       ElevatedButton.icon(
-                                        icon: Icon(Icons.visibility,
-                                            size: 16, color: Colors.white),
-                                        label: Text('View',
-                                            style: TextStyle(fontSize: 12)),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.green,
-                                          foregroundColor: Colors.white,
-                                          padding: EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 0),
-                                          minimumSize: Size(0, 32),
-                                        ),
+                                        icon: const Icon(Icons.visibility,
+                                            size: 14),
+                                        label: const Text('View'),
+                                        style: _getFileButtonStyle(
+                                            backgroundColor:
+                                                AppTheme.successColor),
                                         onPressed: () {
                                           // Switch to tree view and select this file
                                           setState(() {
@@ -1928,88 +1887,135 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // New method to build a compact file card for important system files
-  Widget _buildCompactFileCard(String fileName, String content) {
-    return Card(
-      margin: EdgeInsets.only(bottom: 8),
-      color: Colors.grey[100],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          children: [
-            Icon(Icons.description, size: 16, color: Colors.blue[800]),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                fileName,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                  color: Colors.blue[800],
-                ),
-              ),
-            ),
-            Text(
-              '${content.length} chars',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-            SizedBox(width: 8),
-            ElevatedButton(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.copy, size: 16, color: Colors.white),
-                  SizedBox(width: 4),
-                  Text('Copy', style: TextStyle(fontSize: 12)),
-                ],
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                minimumSize: Size(0, 32),
-              ),
-              onPressed: () {
-                _fallbackClipboardCopy(context, fileName, content);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
+  // Handler for New Project button
+  void _handleNewProject() {
+    setState(() {
+      _projectIdController.clear();
+      _apiTokenController.clear();
+      _rawFetchedYaml = null;
+      _parsedYamlMap = null;
+      _generatedYamlMessage =
+          "Enter Project ID and API Token, then click 'Fetch YAML'.";
+      _operationMessage = "";
+      _exportedFiles.clear();
+      _originalFiles.clear();
+      _changedFiles.clear();
+      _fileControllers.clear();
+      _fileEditModes.clear();
+      _fileValidationTimestamps.clear(); // Clear validation timestamps
+      _fileUpdateTimestamps.clear(); // Clear update timestamps
+      _fileSyncTimestamps.clear(); // Clear sync timestamps
+      _hasModifications = false;
+    });
   }
 
-  // Add new helper method for system file buttons in the top bar
-  Widget _buildTopBarSystemFileButton(String displayName, String filePath) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8.0),
-      child: ElevatedButton.icon(
-        icon: Icon(
-          Icons.description,
-          size: 16,
-          color: Colors.white,
-        ),
-        label: Text(
-          displayName.replaceAll('.yaml', ''),
-          style: TextStyle(
-            fontSize: 12,
-          ),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.blue,
-          foregroundColor: Colors.white,
-          elevation: 3,
-          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-          minimumSize: Size(0, 32),
-        ),
-        onPressed: () {
-          // Switch to tree view and select this file
-          setState(() {
-            _selectedViewIndex = 1; // Switch to tree view
-            _expandedFiles.add(filePath); // Mark as expanded
-          });
-        },
+  // Handler for Recent Projects button
+  void _handleRecentProjects() async {
+    // Load the saved API token
+    final savedApiToken = await PreferencesManager.getApiKey();
+
+    setState(() {
+      if (savedApiToken != null && savedApiToken.isNotEmpty) {
+        _apiTokenController.text = savedApiToken;
+      }
+      _showRecentProjects = true;
+    });
+  }
+
+  // Handler for AI Assist button
+  void _handleAIAssist() {
+    setState(() {
+      _showAIAssist = !_showAIAssist;
+    });
+  }
+
+  // Method to handle AI-generated YAML updates
+  Future<void> _updateYamlFromAI(String yamlContent,
+      {String? existingFile}) async {
+    if (yamlContent.isEmpty) return;
+
+    if (existingFile != null && _exportedFiles.containsKey(existingFile)) {
+      // Update existing file - put it in editing mode like a manual edit
+      setState(() {
+        // Back up the original if this is the first modification
+        if (!_originalFiles.containsKey(existingFile)) {
+          _originalFiles[existingFile] = _exportedFiles[existingFile]!;
+        }
+
+        // Update the file content but don't auto-save - let user review and save manually
+        _exportedFiles[existingFile] = yamlContent;
+        _changedFiles[existingFile] = yamlContent;
+        _hasModifications = true;
+
+        _operationMessage =
+            'AI-generated changes applied to "$existingFile". Review the changes and click Save to upload to FlutterFlow.';
+        _generatedYamlMessage = _operationMessage;
+
+        // Make sure the file is expanded and selected for viewing
+        _expandedFiles.add(existingFile);
+        _selectedFilePath = existingFile;
+
+        // Update the controller and put in editing mode so Save/Discard buttons appear
+        if (!_fileControllers.containsKey(existingFile)) {
+          _fileControllers[existingFile] =
+              TextEditingController(text: yamlContent);
+        } else {
+          _fileControllers[existingFile]!.text = yamlContent;
+        }
+
+        // Switch to tree view to show the updated file
+        _selectedViewIndex = 1;
+      });
+
+      // Mark the file as changed through the normal workflow to ensure proper tracking
+      await _applyFileChanges(existingFile, yamlContent);
+    } else {
+      // Create a new file with AI-generated content
+      final String fileName =
+          'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
+
+      setState(() {
+        // Add to all the file maps so it appears in the tree
+        _exportedFiles[fileName] = yamlContent;
+        _changedFiles[fileName] = yamlContent;
+        _hasModifications = true;
+
+        _operationMessage =
+            'AI-generated YAML file "$fileName" created. Review and click Save to upload to FlutterFlow.';
+        _generatedYamlMessage = _operationMessage;
+
+        // Auto-expand and select the new file so it's visible
+        _expandedFiles.add(fileName);
+        _selectedFilePath = fileName;
+
+        // Create a controller for the new file
+        _fileControllers[fileName] = TextEditingController(text: yamlContent);
+
+        // Switch to tree view to show the new file
+        _selectedViewIndex = 1;
+      });
+
+      // Mark the new file as changed through the normal workflow
+      await _applyFileChanges(fileName, yamlContent);
+    }
+  }
+
+  // Helper method for consistent button styling
+  ButtonStyle _getFileButtonStyle({Color? backgroundColor}) {
+    return ElevatedButton.styleFrom(
+      backgroundColor: backgroundColor ?? AppTheme.surfaceColor,
+      foregroundColor: Colors.white,
+      textStyle: const TextStyle(
+        fontWeight: FontWeight.w500,
+        fontSize: 12,
       ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4),
+      ),
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      minimumSize: const Size(0, 28),
     );
   }
 }
