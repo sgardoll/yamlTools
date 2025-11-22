@@ -70,6 +70,12 @@ The tree view parses the file paths of your YAML files to reconstruct the widget
 
 This provides a much more intuitive visualization than a flat list of files.
 
+## Coming Soon
+
+- Built-in verification flow to validate YAML changes against FlutterFlow constraints before upload.
+- One-click re-upload pipeline to push verified YAML back into your FlutterFlow project without leaving the app.
+- Progress feedback and safety checks so you can confidently round-trip edits from download to re-upload.
+
 ## Development
 
 This project is built with Flutter and can be run on web or desktop platforms.
