@@ -1,66 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../storage/preferences_manager.dart';
-import 'dart:convert';
-import 'package:archive/archive.dart';
-import 'package:yaml/yaml.dart';
+import '../services/ai/ai_service.dart';
+import '../services/ai/ai_models.dart';
+import 'diff_view_widget.dart';
 
-class OpenAIClient {
-  final String apiKey;
-  final String baseUrl;
-
-  OpenAIClient(
-      {required this.apiKey, this.baseUrl = 'https://api.openai.com/v1'});
-
-  Future<Map<String, dynamic>> chat({
-    required String model,
-    required List<Map<String, String>> messages,
-    double? temperature,
-    int? maxTokens,
-    List<Map<String, dynamic>>? tools,
-  }) async {
-    final Uri url = Uri.parse('$baseUrl/chat/completions');
-
-    final Map<String, dynamic> body = {
-      'model': model,
-      'messages': messages,
-    };
-
-    if (temperature != null) {
-      body['temperature'] = temperature;
-    }
-
-    if (maxTokens != null) {
-      body['max_tokens'] = maxTokens;
-    }
-
-    final response = await http.post(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
-      },
-      body: jsonEncode(body),
-    );
-
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    } else {
-      throw Exception(
-          'Failed to get response: ${response.statusCode} ${response.body}');
-    }
-  }
-}
+enum AIState { idle, processing, reviewing }
 
 class AIAssistPanel extends StatefulWidget {
-  final Future<void> Function(String, {String? existingFile}) onUpdateYaml;
+  final Function(ProposedChange) onApplyChanges;
   final Map<String, String> currentFiles;
   final Function() onClose;
 
   const AIAssistPanel({
     Key? key,
-    required this.onUpdateYaml,
+    required this.onApplyChanges,
     required this.currentFiles,
     required this.onClose,
   }) : super(key: key);
@@ -72,64 +26,32 @@ class AIAssistPanel extends StatefulWidget {
 class _AIAssistPanelState extends State<AIAssistPanel> {
   final TextEditingController _apiKeyController = TextEditingController();
   final TextEditingController _promptController = TextEditingController();
-  final ScrollController _chatScrollController = ScrollController();
-  final TextEditingController _yamlSourceController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
-  bool _isLoading = false;
+  AIState _state = AIState.idle;
+  ProposedChange? _currentProposal;
+  // Use proper set literals to avoid runtime issues in web builds
+  Set<String> _pinnedFiles = <String>{};
+  String? _errorMessage;
   bool _isApiKeyValid = false;
-  OpenAIClient? _openAIClient;
-  List<Map<String, String>> _chatHistory = [];
+  AIService? _aiService;
 
-  // Add a list of YAML examples
-  List<String> _yamlExamples = [];
-  // Add a flag to track if external examples are being loaded
-  bool _isLoadingExamples = false;
-  // Track the external source URL
-  String? _externalSourceUrl;
+  // Track which file is currently being viewed in review mode
+  int _selectedModificationIndex = 0;
+  // Track which modifications are selected to apply
+  final Set<int> _selectedModificationIndexes = <int>{};
 
   @override
   void initState() {
     super.initState();
     _loadApiKey();
-    _loadSavedYamlSource();
-    // Load example YAML files
-    _loadYamlExamples();
-  }
-
-  // Method to load YAML examples
-  void _loadYamlExamples() {
-    // Get examples from the current files being displayed
-    setState(() {
-      _yamlExamples = [];
-      widget.currentFiles.forEach((filename, content) {
-        // Only use small to medium sized YAML files as examples
-        if (content.length > 100 &&
-            content.length < 3000 &&
-            filename.endsWith('.yaml')) {
-          _yamlExamples.add("Example: $filename\n$content");
-
-          // Limit to 5 examples to avoid token limits
-          if (_yamlExamples.length >= 5) return;
-        }
-      });
-    });
-  }
-
-  @override
-  void didUpdateWidget(AIAssistPanel oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Reload examples when the files change
-    if (oldWidget.currentFiles != widget.currentFiles) {
-      _loadYamlExamples();
-    }
   }
 
   @override
   void dispose() {
     _apiKeyController.dispose();
     _promptController.dispose();
-    _chatScrollController.dispose();
-    _yamlSourceController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -149,16 +71,10 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
 
   void _validateApiKey(String apiKey) {
     if (apiKey.trim().isNotEmpty) {
-      try {
-        _openAIClient = OpenAIClient(apiKey: apiKey);
-        setState(() {
-          _isApiKeyValid = true;
-        });
-      } catch (e) {
-        setState(() {
-          _isApiKeyValid = false;
-        });
-      }
+      setState(() {
+        _aiService = AIService(apiKey);
+        _isApiKeyValid = true;
+      });
     } else {
       setState(() {
         _isApiKeyValid = false;
@@ -166,870 +82,169 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
     }
   }
 
-  Future<void> _sendPrompt() async {
-    final prompt = _promptController.text.trim();
-    if (prompt.isEmpty || !_isApiKeyValid) return;
+  void _handleSubmit() async {
+    if (_promptController.text.isEmpty || _aiService == null) return;
 
     setState(() {
-      _isLoading = true;
-      _chatHistory.add({'role': 'user', 'content': prompt});
-      _promptController.clear();
+      _state = AIState.processing;
+      _errorMessage = null;
     });
 
-    // Scroll to bottom after adding user message
-    _scrollToBottom();
-
     try {
-      // Construct system message with context about FlutterFlow YAML
-      final systemMessage =
-          "You're an AI assistant that helps modify FlutterFlow YAML files. "
-          "Your primary purpose is to make changes to YAML files that will be uploaded back to FlutterFlow to modify their live project. "
-          "IMPORTANT RULES WHEN MODIFYING YAML:\n"
-          "1. DO NOT change any existing keys in the YAML structure\n"
-          "2. You CAN create new keys, but ensure they are unique\n"
-          "3. Preserve the existing structure and format of the YAML files\n"
-          "4. When suggesting changes, always provide a complete valid YAML snippet that can be directly applied\n"
-          "5. Explain what your changes will do in the FlutterFlow project";
-
-      // Build the conversation messages
-      final messages = [
-        {'role': 'system', 'content': systemMessage},
-      ];
-
-      // Add YAML examples to the context if available, with token limit considerations
-      if (_yamlExamples.isNotEmpty) {
-        // Limit to 3 examples max when sending to API to avoid context overflow
-        final limitedExamples = _yamlExamples.length > 3
-            ? _yamlExamples.sublist(0, 3)
-            : _yamlExamples;
-        final examplesContent =
-            "Here are some example FlutterFlow YAML files to help understand the structure:\n\n" +
-                limitedExamples.join("\n\n---\n\n");
-        messages.add({'role': 'system', 'content': examplesContent});
-      }
-
-      // Add project context with token conservation
-      Map<String, String> limitedCurrentFiles = {};
-      int totalContextSize = 0;
-
-      // First pass: Include only small files
-      widget.currentFiles.forEach((filename, content) {
-        if (content.length < 1000 && totalContextSize < 40000) {
-          limitedCurrentFiles[filename] = content;
-          totalContextSize += content.length;
-        }
-      });
-
-      // Only if we have token budget remaining, add medium-sized files
-      if (totalContextSize < 40000) {
-        widget.currentFiles.forEach((filename, content) {
-          if (!limitedCurrentFiles.containsKey(filename) &&
-              content.length >= 1000 &&
-              content.length < 3000 &&
-              totalContextSize + content.length < 40000) {
-            limitedCurrentFiles[filename] = content;
-            totalContextSize += content.length;
-          }
-        });
-      }
-
-      // Build the context message with limited files
-      if (limitedCurrentFiles.isNotEmpty) {
-        String filesContext = "";
-        limitedCurrentFiles.forEach((filename, content) {
-          filesContext += "File: $filename\n$content\n\n";
-        });
-
-        messages.add({
-          'role': 'system',
-          'content': "Current project files (limited selection):\n$filesContext"
-        });
-      }
-
-      // Add chat history (limited to last few exchanges to avoid token limits)
-      final recentHistory = _chatHistory.length > 4
-          ? _chatHistory.sublist(_chatHistory.length - 4)
-          : _chatHistory;
-
-      for (final message in recentHistory) {
-        messages.add(message);
-      }
-
-      // Make OpenAI API call
-      final response = await _openAIClient!.chat(
-        model: "gpt-4o", // Using GPT-4o as specified
-        messages: messages,
-        temperature: 0.7,
-        maxTokens: 2000,
+      final request = AIRequest(
+        userPrompt: _promptController.text,
+        pinnedFilePaths: _pinnedFiles.toList(),
+        projectFiles: widget.currentFiles,
       );
 
-      // Extract the assistant's response
-      final assistantMessage =
-          response['choices'][0]['message']['content'] as String;
+      final proposal = await _aiService!.requestModification(request: request);
 
       setState(() {
-        _chatHistory.add({'role': 'assistant', 'content': assistantMessage});
-        _isLoading = false;
+        _currentProposal = proposal;
+        _state = AIState.reviewing;
+        _selectedModificationIndex = 0;
+        _selectedModificationIndexes
+          ..clear()
+          ..addAll(List<int>.generate(proposal.modifications.length, (i) => i));
       });
-
-      // Scroll to bottom after receiving response
-      _scrollToBottom();
-
-      // Check if the assistant's message contains YAML code that should be applied
-      _checkForYamlUpdates(assistantMessage);
     } catch (e) {
       setState(() {
-        _chatHistory
-            .add({'role': 'assistant', 'content': 'Error: ${e.toString()}'});
-        _isLoading = false;
+        _state = AIState.idle;
+        _errorMessage = e.toString();
       });
-      _scrollToBottom();
     }
   }
 
-  void _checkForYamlUpdates(String message) {
-    // Look for code blocks containing YAML - match both ```yaml and ```flutterflow blocks
-    final yamlCodeBlockRegex =
-        RegExp(r'```(?:yaml|flutterflow)\n([\s\S]*?)\n```');
-    final matches = yamlCodeBlockRegex.allMatches(message);
-
-    for (final match in matches) {
-      if (match.groupCount >= 1) {
-        final yamlContent = match.group(1);
-        if (yamlContent != null && yamlContent.trim().isNotEmpty) {
-          // Try to identify which file this should modify
-          _identifyAndShowUpdateDialog(yamlContent);
-          break; // Only show dialog for the first YAML block found
+  void _handleMerge() {
+    if (_currentProposal != null) {
+      // Apply only the selected file modifications
+      final selectedMods = <FileModification>[];
+      for (var i = 0; i < _currentProposal!.modifications.length; i++) {
+        if (_selectedModificationIndexes.contains(i)) {
+          selectedMods.add(_currentProposal!.modifications[i]);
         }
       }
-    }
-  }
-
-  // New method to identify target file for YAML updates
-  void _identifyAndShowUpdateDialog(String yamlContent) {
-    try {
-      // Try to parse the YAML to detect its structure
-      final parsedYaml = loadYaml(yamlContent);
-
-      // List of potential target files based on content similarity
-      List<String> potentialTargets = [];
-      String? bestMatch;
-      double bestMatchScore = 0;
-
-      // Check each file to find a potential match
-      widget.currentFiles.forEach((fileName, content) {
-        if (fileName.endsWith('.yaml')) {
-          try {
-            // Simple similarity check based on key presence
-            final existingYaml = loadYaml(content);
-            if (existingYaml is Map && parsedYaml is Map) {
-              // Count matching top-level keys to determine similarity
-              int matchingKeys = 0;
-              int totalKeys = 0;
-
-              parsedYaml.keys.forEach((key) {
-                totalKeys++;
-                if (existingYaml.containsKey(key)) {
-                  matchingKeys++;
-                }
-              });
-
-              // Calculate a similarity score (0.0 - 1.0)
-              double similarityScore =
-                  totalKeys > 0 ? matchingKeys / totalKeys : 0;
-
-              // Consider files with at least 30% similarity as potential targets
-              if (similarityScore >= 0.3) {
-                potentialTargets.add(fileName);
-
-                // Track the best match
-                if (similarityScore > bestMatchScore) {
-                  bestMatchScore = similarityScore;
-                  bestMatch = fileName;
-                }
-              }
-            }
-          } catch (e) {
-            // Ignore parsing errors for existing files
-            print('Error parsing existing file $fileName: $e');
-          }
-        }
+      final filtered = ProposedChange(
+        summary: _currentProposal!.summary,
+        modifications: selectedMods,
+      );
+      widget.onApplyChanges(filtered);
+      // Reset state but keep API key
+      setState(() {
+        _state = AIState.idle;
+        _currentProposal = null;
+        _promptController.clear();
+        _pinnedFiles.clear();
+        _selectedModificationIndexes.clear();
       });
-
-      // Show dialog with file selection options
-      _showYamlUpdateDialog(yamlContent, potentialTargets, bestMatch);
-    } catch (e) {
-      // If parsing fails, just show the standard dialog without file suggestions
-      _showYamlUpdateDialog(yamlContent, [], null);
-      print('Error parsing YAML for file identification: $e');
     }
   }
 
-  void _showYamlUpdateDialog(
-      String yamlContent, List<String> potentialTargets, String? bestMatch) {
-    String? selectedFile = bestMatch; // Track the selected file
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('Apply FlutterFlow YAML Changes'),
-          content: Container(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                      'The AI has suggested the following changes to your FlutterFlow project:'),
-                  SizedBox(height: 12),
-                  Container(
-                    padding: EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.black12,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: SelectableText(
-                      yamlContent,
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 16),
-
-                  // Add file selection for updating existing files
-                  if (potentialTargets.isNotEmpty) ...[
-                    Text(
-                      'Select the file to update:',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    ...potentialTargets
-                        .map(
-                          (fileName) => RadioListTile<String>(
-                            title: Text(fileName,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: fileName == selectedFile
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                )),
-                            value: fileName,
-                            groupValue: selectedFile,
-                            onChanged: (value) {
-                              setDialogState(() {
-                                selectedFile = value;
-                              });
-                            },
-                            dense: true,
-                            selected: fileName == selectedFile,
-                          ),
-                        )
-                        .toList(),
-                    Divider(),
-                  ],
-
-                  Text(
-                    potentialTargets.isEmpty
-                        ? 'These changes will be added as a new file in your project.'
-                        : 'Or create a new file with these changes:',
-                    style: TextStyle(
-                      fontStyle: FontStyle.italic,
-                      color: Colors.orange[800],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
-            ),
-
-            // Update existing file button (only show if a file is selected)
-            if (potentialTargets.isNotEmpty && selectedFile != null)
-              ElevatedButton(
-                onPressed: () async {
-                  Navigator.pop(context);
-                  // Show confirmation dialog for the selected file
-                  _confirmFileUpdate(yamlContent, selectedFile!);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                ),
-                child: Text('Update Selected File'),
-              ),
-
-            // Create new file button
-            ElevatedButton(
-              onPressed: () async {
-                // Create a new file if no existing file is selected
-                await widget.onUpdateYaml(yamlContent);
-                Navigator.pop(context);
-              },
-              child: Text('Create New File'),
-            ),
-          ],
-        ),
-      ),
-    );
+  void _handleDiscard() {
+    setState(() {
+      _state = AIState.idle;
+      _currentProposal = null;
+    });
   }
 
-  // New method to confirm updating an existing file
-  void _confirmFileUpdate(String yamlContent, String fileName) {
-    final existingContent = widget.currentFiles[fileName] ?? '';
-
-    // Create a controller for the AI-generated content so it can be edited
-    final TextEditingController aiContentController =
-        TextEditingController(text: yamlContent);
-
-    // Debug output to ensure content is available
-    print('DEBUG: Confirming update for $fileName');
-    print('DEBUG: Existing content length: ${existingContent.length}');
-    print('DEBUG: New content length: ${yamlContent.length}');
+  void _showContextPicker() {
+    // Capture state outside the builder so it persists across setState calls
+    final allFiles = widget.currentFiles.keys.toList()..sort();
+    String query = '';
+    // Initialize with filtered list (exclude special aggregate files)
+    List<String> files = allFiles
+        .where((file) => file != 'complete_raw.yaml' && file != 'raw_project.yaml')
+        .toList();
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('Confirm Update to $fileName'),
-          content: Container(
-            width: double.maxFinite,
-            height: 700, // Increased height for better UX
-            child: Column(
-              children: [
-                // Header with clear explanation
-                Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info_outline,
-                          color: Colors.blue[700], size: 20),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Review the AI-generated changes below. You can edit the new version before applying it.',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.blue[800],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Select Context Files'),
+              content: Container(
+                width: double.maxFinite,
+                height: 400,
+                child: Column(
+                  children: [
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search files...',
+                        prefixIcon: Icon(Icons.search),
                       ),
-                    ],
-                  ),
-                ),
-
-                SizedBox(height: 16),
-
-                // Tab bar for switching between diff and edit modes
-                DefaultTabController(
-                  length: 2,
-                  child: Expanded(
-                    child: Column(
-                      children: [
-                        TabBar(
-                          tabs: [
-                            Tab(
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.compare_arrows, size: 16),
-                                  SizedBox(width: 8),
-                                  Text('View Changes'),
-                                ],
-                              ),
-                            ),
-                            Tab(
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.edit, size: 16),
-                                  SizedBox(width: 8),
-                                  Text('Edit AI Version'),
-                                ],
-                              ),
-                            ),
-                          ],
-                          labelColor: Colors.blue[700],
-                          unselectedLabelColor: Colors.grey[600],
-                          indicatorColor: Colors.blue[700],
-                        ),
-                        Expanded(
-                          child: TabBarView(
-                            children: [
-                              // Diff view tab
-                              _buildDiffView(existingContent,
-                                  aiContentController.text, fileName),
-
-                              // Edit tab
-                              _buildEditView(
-                                  aiContentController, setDialogState),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                aiContentController.dispose();
-                Navigator.pop(context);
-              },
-              child: Text('Cancel'),
-            ),
-            ElevatedButton.icon(
-              icon: Icon(Icons.update, size: 16),
-              label: Text('Apply Changes'),
-              onPressed: () async {
-                final finalContent = aiContentController.text;
-                aiContentController.dispose();
-                Navigator.pop(context);
-
-                // Show a loading indicator
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Row(
-                      children: [
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        ),
-                        SizedBox(width: 12),
-                        Text('Applying changes to $fileName...'),
-                      ],
-                    ),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-
-                // Update the existing file with the possibly edited content
-                await widget.onUpdateYaml(finalContent, existingFile: fileName);
-
-                // Show success message with clear guidance
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Row(
-                      children: [
-                        Icon(Icons.check_circle, color: Colors.white, size: 16),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            '✅ $fileName updated! The file is now ready to Save to FlutterFlow.',
-                          ),
-                        ),
-                      ],
-                    ),
-                    backgroundColor: Colors.green[600],
-                    duration: Duration(seconds: 4),
-                    action: SnackBarAction(
-                      label: 'View File',
-                      textColor: Colors.white,
-                      onPressed: () {
-                        // File should already be selected by the update process
+                      onChanged: (value) {
+                        setState(() {
+                          query = value.trim().toLowerCase();
+                          files = allFiles.where((file) {
+                            // Hide only special aggregate files
+                            if (file == 'complete_raw.yaml' || file == 'raw_project.yaml') {
+                              return false;
+                            }
+                            final display = file.startsWith('archive_')
+                                ? file.substring('archive_'.length)
+                                : file;
+                            return file.toLowerCase().contains(query) ||
+                                display.toLowerCase().contains(query);
+                          }).toList();
+                        });
                       },
                     ),
-                  ),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green[600],
-                foregroundColor: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Build a diff view similar to the existing DiffViewWidget
-  Widget _buildDiffView(
-      String originalContent, String newContent, String fileName) {
-    return Container(
-      margin: EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(8),
-                topRight: Radius.circular(8),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.compare_arrows, size: 16, color: Colors.grey[700]),
-                SizedBox(width: 8),
-                Text(
-                  'Changes in $fileName',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[800],
-                    fontSize: 14,
-                  ),
+                    SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: files.length,
+                        itemBuilder: (context, index) {
+                          final file = files[index];
+                          // Skip only special aggregate files; include archive_ files
+                          if (file == 'complete_raw.yaml' ||
+                              file == 'raw_project.yaml') {
+                            return SizedBox.shrink();
+                          }
+                          final displayName = file.startsWith('archive_')
+                              ? file.substring('archive_'.length)
+                              : file;
+                          
+                          final isSelected = _pinnedFiles.contains(file);
+                          return CheckboxListTile(
+                            title: Text(displayName, style: TextStyle(fontSize: 13)),
+                            value: isSelected,
+                            onChanged: (val) {
+                              setState(() {
+                                if (val == true) {
+                                  _pinnedFiles.add(file);
+                                } else {
+                                  _pinnedFiles.remove(file);
+                                }
+                              });
+                              // Update the parent widget state as well
+                              this.setState(() {});
+                            },
+                            dense: true,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-                Spacer(),
-                Text(
-                  '${originalContent.length} → ${newContent.length} chars',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Done'),
                 ),
               ],
-            ),
-          ),
-
-          // Diff content
-          Expanded(
-            child: _buildSimpleDiff(originalContent, newContent),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Build edit view for the AI-generated content
-  Widget _buildEditView(
-      TextEditingController controller, StateSetter setDialogState) {
-    return Container(
-      margin: EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-        color: Colors.green.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.green.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.1),
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(8),
-                topRight: Radius.circular(8),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.edit, size: 16, color: Colors.green[700]),
-                SizedBox(width: 8),
-                Text(
-                  'Edit AI-Generated Content',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green[800],
-                    fontSize: 14,
-                  ),
-                ),
-                Spacer(),
-                Text(
-                  '${controller.text.length} chars',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Editable content
-          Expanded(
-            child: Container(
-              padding: EdgeInsets.all(12),
-              child: TextField(
-                controller: controller,
-                maxLines: null,
-                expands: true,
-                decoration: InputDecoration(
-                  border: InputBorder.none,
-                  hintText: 'Edit the AI-generated YAML content here...',
-                  hintStyle: TextStyle(color: Colors.grey[400]),
-                ),
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  color: Colors.black87,
-                  height: 1.4,
-                ),
-                onChanged: (value) {
-                  setDialogState(() {
-                    // This will update the character count
-                  });
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Simple diff implementation with line-by-line comparison
-  Widget _buildSimpleDiff(String original, String modified) {
-    final originalLines = original.split('\n');
-    final modifiedLines = modified.split('\n');
-
-    // Simple line-by-line comparison
-    List<Widget> diffLines = [];
-    int maxLines = originalLines.length > modifiedLines.length
-        ? originalLines.length
-        : modifiedLines.length;
-
-    for (int i = 0; i < maxLines; i++) {
-      String? originalLine = i < originalLines.length ? originalLines[i] : null;
-      String? modifiedLine = i < modifiedLines.length ? modifiedLines[i] : null;
-
-      if (originalLine == modifiedLine) {
-        // Unchanged line
-        if (originalLine != null) {
-          diffLines.add(_buildDiffLine(
-              originalLine, Colors.grey[100], Colors.black87, '  '));
-        }
-      } else {
-        // Changed lines
-        if (originalLine != null) {
-          diffLines.add(_buildDiffLine(
-              originalLine, Colors.red[50], Colors.red[800], '- '));
-        }
-        if (modifiedLine != null) {
-          diffLines.add(_buildDiffLine(
-              modifiedLine, Colors.green[50], Colors.green[800], '+ '));
-        }
-      }
-    }
-
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: diffLines,
-      ),
-    );
-  }
-
-  // Build a single diff line with proper styling
-  Widget _buildDiffLine(
-      String line, Color? backgroundColor, Color? textColor, String prefix) {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      color: backgroundColor,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            prefix,
-            style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 12,
-              color: textColor,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          Expanded(
-            child: Text(
-              line,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                color: textColor,
-                height: 1.3,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _scrollToBottom() {
-    Future.delayed(Duration(milliseconds: 100), () {
-      if (_chatScrollController.hasClients) {
-        _chatScrollController.animateTo(
-          _chatScrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 300),
-          curve: Curves.easeOut,
+            );
+          },
         );
-      }
-    });
-  }
-
-  // Method to fetch YAML examples from a URL
-  Future<void> _fetchExternalYamlExamples(String url) async {
-    if (url.isEmpty) return;
-
-    setState(() {
-      _isLoadingExamples = true;
-      _chatHistory.add({
-        'role': 'assistant',
-        'content': 'Fetching and processing YAML examples from $url...'
-      });
-    });
-
-    try {
-      final response = await http.get(Uri.parse(url));
-
-      if (response.statusCode == 200) {
-        // Store the URL for future reference
-        _externalSourceUrl = url;
-        await PreferencesManager.saveYamlSourceUrl(url);
-
-        // Process the ZIP file
-        try {
-          // Decode the bytes as a zip file
-          final bytes = response.bodyBytes;
-          final archive = ZipDecoder().decodeBytes(bytes);
-
-          // This will store our examples
-          _yamlExamples = [];
-          int examplesCount = 0;
-          int projectsProcessed = 0;
-          int totalTokens = 0; // Track estimated token count
-
-          // Rough token estimation: 1 token ~= 4 characters for English text
-          const int MAX_TOKENS = 20000; // Set a conservative max tokens limit
-          const int MAX_EXAMPLES = 5; // Reduce max examples from 10 to 5
-          const int MAX_FILE_SIZE =
-              2000; // Reduce max file size for safer limits
-
-          // Process each file in the main archive
-          for (final file in archive) {
-            if (!file.isFile || !file.name.endsWith('.zip')) continue;
-
-            try {
-              // Each file is itself a zip file containing project YAML
-              final projectBytes = file.content as List<int>;
-              final projectArchive = ZipDecoder().decodeBytes(projectBytes);
-              projectsProcessed++;
-
-              // Extract YAML examples from this project
-              for (final projectFile in projectArchive) {
-                if (projectFile.isFile &&
-                    projectFile.name.endsWith('.yaml') &&
-                    projectFile.size > 100 &&
-                    projectFile.size < MAX_FILE_SIZE) {
-                  // Stricter file size limit
-
-                  // Extract the file content
-                  final fileData = projectFile.content as List<int>;
-                  final fileContent =
-                      utf8.decode(fileData, allowMalformed: true);
-
-                  // Calculate estimated tokens for this content
-                  int estimatedTokens = (fileContent.length / 4).ceil() +
-                      50; // Add buffer for metadata
-
-                  // Check if adding this would exceed our token budget
-                  if (totalTokens + estimatedTokens > MAX_TOKENS) {
-                    print('Token limit reached. Stopping example collection.');
-                    break;
-                  }
-
-                  // Truncate very long content if needed (rare case)
-                  String processedContent = fileContent;
-                  if (fileContent.length > MAX_FILE_SIZE * 2) {
-                    processedContent = fileContent.substring(0, MAX_FILE_SIZE) +
-                        "\n\n... (content truncated for brevity) ...\n\n" +
-                        fileContent.substring(fileContent.length - 500);
-                  }
-
-                  // Add as an example
-                  _yamlExamples
-                      .add("Example: ${projectFile.name}\n$processedContent");
-                  examplesCount++;
-                  totalTokens += estimatedTokens;
-
-                  // Log token usage
-                  print(
-                      'Added example ${projectFile.name}, tokens: $estimatedTokens, total: $totalTokens');
-
-                  // Limit to max examples
-                  if (examplesCount >= MAX_EXAMPLES) break;
-                }
-              }
-
-              // If we've collected enough examples, stop processing more projects
-              if (examplesCount >= MAX_EXAMPLES || totalTokens > MAX_TOKENS)
-                break;
-            } catch (e) {
-              print('Error processing project ZIP ${file.name}: $e');
-            }
-          }
-
-          setState(() {
-            _isLoadingExamples = false;
-            _chatHistory.add({
-              'role': 'assistant',
-              'content':
-                  'Successfully loaded $examplesCount YAML examples (est. $totalTokens tokens) from $projectsProcessed projects.'
-            });
-          });
-        } catch (e) {
-          throw Exception('Failed to process ZIP file: ${e.toString()}');
-        }
-      } else {
-        throw Exception('Failed to load YAML examples: ${response.statusCode}');
-      }
-    } catch (e) {
-      setState(() {
-        _isLoadingExamples = false;
-        _chatHistory.add({
-          'role': 'assistant',
-          'content': 'Error loading external YAML examples: ${e.toString()}'
-        });
-      });
-      _scrollToBottom();
-    }
-  }
-
-  // Load saved YAML source URL
-  Future<void> _loadSavedYamlSource() async {
-    final savedUrl = await PreferencesManager.getYamlSourceUrl();
-    if (savedUrl != null && savedUrl.isNotEmpty) {
-      _yamlSourceController.text = savedUrl;
-      _fetchExternalYamlExamples(savedUrl);
-    }
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 380,
+      width: 450, // Slightly wider for diff view
       decoration: BoxDecoration(
         color: AppTheme.surfaceColor,
         border: Border(
@@ -1042,9 +257,8 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
       child: Column(
         children: [
           _buildHeader(),
-          _buildApiKeySection(),
-          _buildYamlSourceSection(),
-          if (_isApiKeyValid) _buildChatSection(),
+          if (!_isApiKeyValid) _buildApiKeySection(),
+          if (_isApiKeyValid) Expanded(child: _buildMainContent()),
         ],
       ),
     );
@@ -1064,9 +278,15 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'FlutterFlow YAML Assistant',
-            style: AppTheme.headingMedium,
+          Row(
+            children: [
+              Icon(Icons.auto_awesome, color: AppTheme.primaryColor),
+              SizedBox(width: 8),
+              Text(
+                'AI Developer',
+                style: AppTheme.headingMedium,
+              ),
+            ],
           ),
           IconButton(
             icon: Icon(Icons.close),
@@ -1116,202 +336,285 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
               ),
             ],
           ),
-          if (!_isApiKeyValid && _apiKeyController.text.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text(
-                'Please enter a valid OpenAI API key',
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
         ],
       ),
     );
   }
 
-  Widget _buildYamlSourceSection() {
+  Widget _buildMainContent() {
+    switch (_state) {
+      case AIState.idle:
+        return _buildInputState();
+      case AIState.processing:
+        return _buildProcessingState();
+      case AIState.reviewing:
+        return _buildReviewState();
+    }
+  }
+
+  Widget _buildInputState() {
     return Padding(
       padding: EdgeInsets.all(16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'External YAML Examples Source (Optional)',
-            style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+            'Describe the changes you want to make:',
+            style: AppTheme.bodyMedium,
           ),
           SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _yamlSourceController,
-                  decoration: InputDecoration(
-                    hintText: 'Enter URL to YAML examples',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(width: 8),
-              _isLoadingExamples
-                  ? SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : ElevatedButton(
-                      onPressed: () {
-                        final url = _yamlSourceController.text.trim();
-                        if (url.isNotEmpty) {
-                          _fetchExternalYamlExamples(url);
-                        }
-                      },
-                      child: Text('Load'),
-                    ),
-            ],
-          ),
-          if (_externalSourceUrl != null)
-            Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text(
-                'External examples loaded from: $_externalSourceUrl',
-                style: TextStyle(
-                  color: Colors.green,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildChatSection() {
-    return Expanded(
-      child: Column(
-        children: [
-          Divider(),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Create and modify FlutterFlow YAML configurations',
-              style: AppTheme.bodyMedium,
-            ),
-          ),
-          SizedBox(height: 8),
-          Expanded(
-            child: _buildChatHistory(),
-          ),
-          _buildPromptInput(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildChatHistory() {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.dividerColor),
-      ),
-      child: ListView.builder(
-        controller: _chatScrollController,
-        padding: EdgeInsets.all(16),
-        itemCount: _chatHistory.length,
-        itemBuilder: (context, index) {
-          final message = _chatHistory[index];
-          final isUser = message['role'] == 'user';
-
-          return Container(
-            margin: EdgeInsets.only(bottom: 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: isUser ? AppTheme.primaryColor : Colors.green,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Icon(
-                      isUser ? Icons.person : Icons.smart_toy,
-                      size: 16,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Container(
-                    padding: EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isUser
-                          ? AppTheme.primaryColor.withOpacity(0.1)
-                          : Colors.green.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: SelectableText(
-                      message['content'] ?? '',
-                      style: AppTheme.bodyMedium,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildPromptInput() {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: AppTheme.dividerColor),
-        ),
-      ),
-      child: Row(
-        children: [
           Expanded(
             child: TextField(
               controller: _promptController,
               decoration: InputDecoration(
-                hintText:
-                    'Describe the changes you want to make to your FlutterFlow project...',
+                hintText: 'E.g., "Add a verified boolean field to the users collection" or "Change the primary color to red"',
                 border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
+                alignLabelWithHint: true,
               ),
-              maxLines: 3,
-              minLines: 1,
-              onSubmitted: (_) => _sendPrompt(),
+              maxLines: null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
             ),
           ),
-          SizedBox(width: 8),
-          IconButton(
-            icon: _isLoading
-                ? SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(Icons.send),
-            onPressed: _isLoading ? null : _sendPrompt,
-            tooltip: 'Send message',
+          SizedBox(height: 16),
+          
+          // Context Pinning
+          Row(
+            children: [
+              ElevatedButton.icon(
+                onPressed: _showContextPicker,
+                icon: Icon(Icons.playlist_add_check, size: 18),
+                label: Text('Context Files (${_pinnedFiles.length})'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _pinnedFiles.isNotEmpty ? Colors.blue[100] : Colors.grey[200],
+                  foregroundColor: Colors.black87,
+                ),
+              ),
+              Spacer(),
+            ],
+          ),
+          
+          if (_pinnedFiles.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: _pinnedFiles.map((f) => Chip(
+                  label: Text(f, style: TextStyle(fontSize: 10)),
+                  deleteIcon: Icon(Icons.close, size: 12),
+                  onDeleted: () {
+                    setState(() {
+                      _pinnedFiles.remove(f);
+                    });
+                  },
+                  visualDensity: VisualDensity.compact,
+                )).toList(),
+              ),
+            ),
+            
+          SizedBox(height: 16),
+          
+          if (_errorMessage != null)
+             Padding(
+               padding: const EdgeInsets.only(bottom: 16.0),
+               child: Text(
+                 _errorMessage!,
+                 style: TextStyle(color: Colors.red),
+               ),
+             ),
+
+          SizedBox(
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: _handleSubmit,
+              icon: Icon(Icons.auto_awesome),
+              label: Text('Generate Changes'),
+              style: AppTheme.primaryButtonStyle,
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildProcessingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 24),
+          Text(
+            'Analyzing project structure...',
+            style: AppTheme.headingSmall,
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Generating YAML modifications',
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewState() {
+    final mods = _currentProposal!.modifications;
+    final currentMod = mods.isNotEmpty ? mods[_selectedModificationIndex] : null;
+
+    return Column(
+      children: [
+        // Summary Header
+        Container(
+          width: double.infinity,
+          padding: EdgeInsets.all(16),
+          color: Colors.blue[50],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Proposed Changes',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue[900],
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                _currentProposal!.summary,
+                style: TextStyle(color: Colors.blue[800]),
+              ),
+              SizedBox(height: 8),
+              Row(
+                children: [
+                  Checkbox(
+                    value: _selectedModificationIndexes.length == mods.length && mods.isNotEmpty,
+                    onChanged: (checked) {
+                      setState(() {
+                        _selectedModificationIndexes.clear();
+                        if (checked == true) {
+                          _selectedModificationIndexes.addAll(
+                              List<int>.generate(mods.length, (i) => i));
+                        }
+                      });
+                    },
+                  ),
+                  Text('Apply ${_selectedModificationIndexes.length}/${mods.length} files'),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // File Tabs
+        if (mods.length > 1)
+          Container(
+            height: 40,
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppTheme.dividerColor)),
+            ),
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: mods.length,
+              itemBuilder: (context, index) {
+                final isSelected = index == _selectedModificationIndex;
+                final isChecked = _selectedModificationIndexes.contains(index);
+                return InkWell(
+                  onTap: () => setState(() => _selectedModificationIndex = index),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: isSelected ? AppTheme.primaryColor : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                      color: isSelected ? Colors.blue.withOpacity(0.05) : null,
+                    ),
+                    child: Row(
+                      children: [
+                        Checkbox(
+                          value: isChecked,
+                          onChanged: (val) {
+                            setState(() {
+                              if (val == true) {
+                                _selectedModificationIndexes.add(index);
+                              } else {
+                                _selectedModificationIndexes.remove(index);
+                              }
+                            });
+                          },
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          mods[index].filePath,
+                          style: TextStyle(
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected ? AppTheme.primaryColor : Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+        // Diff View
+        Expanded(
+          child: currentMod != null
+              ? DiffViewWidget(
+                  originalContent: currentMod.originalContent,
+                  modifiedContent: currentMod.newContent,
+                  fileName: currentMod.filePath,
+                )
+              : Center(child: Text("No modifications")),
+        ),
+
+        // Actions
+        Container(
+          padding: EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                offset: Offset(0, -2),
+                blurRadius: 4,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _handleDiscard,
+                  child: Text('Discard'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: BorderSide(color: Colors.red.withOpacity(0.5)),
+                  ),
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _selectedModificationIndexes.isEmpty ? null : _handleMerge,
+                  child: Text('Apply Selected as Local Edits'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

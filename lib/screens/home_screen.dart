@@ -14,6 +14,7 @@ import '../widgets/project_header.dart';
 import '../widgets/yaml_content_viewer.dart';
 import '../widgets/modern_yaml_tree.dart';
 import '../widgets/ai_assist_panel.dart'; // Import the new AI Assist panel
+import '../services/ai/ai_models.dart'; // Import AI models
 import '../services/flutterflow_api_service.dart'; // Import FlutterFlow API service
 import '../theme/app_theme.dart';
 // import '../services/validation_service.dart'; // File doesn't exist
@@ -307,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Apply changes to a file and update modification tracking
-  Future<void> _applyFileChanges(String fileName, String newContent) async {
+  Future<void> _applyFileChanges(String fileName, String newContent, {bool validated = false}) async {
     // Only update if content has actually changed
     if (_exportedFiles[fileName] != newContent) {
       setState(() {
@@ -321,10 +322,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _changedFiles[fileName] = newContent;
         _hasModifications = true;
 
-        // Track validation timestamp when file is saved
-        _fileValidationTimestamps[fileName] = DateTime.now();
+        // Track validation timestamp only when explicitly validated
+        if (validated) {
+          _fileValidationTimestamps[fileName] = DateTime.now();
+        }
 
-        // Track update timestamp when file is saved
+        // Always track local update timestamp when file content changes
         _fileUpdateTimestamps[fileName] = DateTime.now();
 
         // Update the message to indicate a manual edit was made
@@ -866,6 +869,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           validationTimestamps:
                                               _fileValidationTimestamps,
                                           syncTimestamps: _fileSyncTimestamps,
+                                          updateTimestamps: _fileUpdateTimestamps,
                                         ),
                                 ),
 
@@ -887,8 +891,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                     projectId: _projectIdController.text,
                                     onContentChanged: _selectedFilePath != null
                                         ? (content) async {
+                                            // Content has been validated successfully in YamlContentViewer
                                             await _applyFileChanges(
-                                                _selectedFilePath!, content);
+                                              _selectedFilePath!,
+                                              content,
+                                              validated: true,
+                                            );
                                           }
                                         : null,
                                     onFileUpdated: _selectedFilePath != null
@@ -916,7 +924,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // Add AI Assist panel
             if (_showAIAssist)
               AIAssistPanel(
-                onUpdateYaml: _updateYamlFromAI,
+                onApplyChanges: _applyAIChanges,
                 currentFiles: _exportedFiles,
                 onClose: _handleAIAssist,
               ),
@@ -1536,14 +1544,26 @@ class _HomeScreenState extends State<HomeScreen> {
                                                         AppTheme.successColor),
                                                 onPressed: () async {
                                                   await _applyFileChanges(
-                                                      fileName,
-                                                      _fileControllers[
-                                                              fileName]!
-                                                          .text);
+                                                    fileName,
+                                                    _fileControllers[fileName]!
+                                                        .text,
+                                                    validated: false,
+                                                  );
                                                   setState(() {
                                                     _fileEditModes[fileName] =
                                                         false;
                                                   });
+                                                  // Guide users to validate & sync via the right panel
+                                                  ScaffoldMessenger.of(context)
+                                                    ..hideCurrentSnackBar()
+                                                    ..showSnackBar(
+                                                      SnackBar(
+                                                        content: Text(
+                                                          'Saved locally. Select the file on the right and press Save to validate and sync to FlutterFlow.',
+                                                        ),
+                                                        duration: Duration(seconds: 4),
+                                                      ),
+                                                    );
                                                 },
                                               )
                                             : ElevatedButton.icon(
@@ -1961,6 +1981,45 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Method to handle AI-generated YAML updates
+  Future<void> _applyAIChanges(ProposedChange change) async {
+    setState(() {
+      _generatedYamlMessage = change.summary;
+      _operationMessage = "Applied AI changes: ${change.summary}";
+    });
+
+    for (var mod in change.modifications) {
+      await _updateYamlFromAI(mod.newContent,
+          existingFile: mod.isNewFile ? null : mod.filePath);
+    }
+
+    // Refresh view
+    setState(() {
+      _selectedViewIndex = 1; // Tree view
+    });
+
+    // Notify user to review and save each file to validate & sync
+    try {
+      final appliedFiles = change.modifications
+          .map((m) => m.filePath)
+          .toSet()
+          .whereType<String>()
+          .toList();
+      final fileCount = appliedFiles.length;
+      if (mounted && fileCount > 0) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Staged $fileCount file${fileCount == 1 ? '' : 's'} as local edits. Select each file and press Save to validate and sync to FlutterFlow.',
+              ),
+              duration: Duration(seconds: 5),
+            ),
+          );
+      }
+    } catch (_) {}
+  }
+
   Future<void> _updateYamlFromAI(String yamlContent,
       {String? existingFile}) async {
     if (yamlContent.isEmpty) return;
@@ -1999,7 +2058,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
       // Mark the file as changed through the normal workflow to ensure proper tracking
-      await _applyFileChanges(existingFile, yamlContent);
+      await _applyFileChanges(existingFile, yamlContent, validated: false);
     } else {
       // Create a new file with AI-generated content
       final String fileName =
@@ -2026,8 +2085,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedViewIndex = 1;
       });
 
-      // Mark the new file as changed through the normal workflow
-      await _applyFileChanges(fileName, yamlContent);
+      // Mark the new file as changed through the normal workflow (not yet validated)
+      await _applyFileChanges(fileName, yamlContent, validated: false);
     }
   }
 
