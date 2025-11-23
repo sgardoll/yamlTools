@@ -47,7 +47,6 @@ analysis_benchmark.json
 .pub-preload-cache/
 .pub/
 build/
-/assets/
 /canvaskit/
 /icons/
 /flutter.js
