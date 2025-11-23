@@ -69,6 +69,25 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
     await PreferencesManager.saveOpenAIKey(apiKey);
   }
 
+  Future<void> _clearApiKey() async {
+    await PreferencesManager.clearOpenAIKey();
+    setState(() {
+      _apiKeyController.clear();
+      _aiService = null;
+      _isApiKeyValid = false;
+    });
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('OpenAI API key cleared'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+  }
+
   void _validateApiKey(String apiKey) {
     if (apiKey.trim().isNotEmpty) {
       setState(() {
@@ -260,7 +279,7 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
       child: Column(
         children: [
           _buildHeader(),
-          if (!_isApiKeyValid) _buildApiKeySection(),
+          _isApiKeyValid ? _buildApiKeyStatusBar() : _buildApiKeySection(),
           if (_isApiKeyValid) Expanded(child: _buildMainContent()),
         ],
       ),
@@ -335,7 +354,53 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                 },
                 child: Text('Save'),
               ),
+              SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _clearApiKey,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Clear'),
+              ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildApiKeyStatusBar() {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: AppTheme.dividerColor,
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.verified_user, color: AppTheme.successColor, size: 18),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'OpenAI key stored securely',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _isApiKeyValid = false;
+              });
+            },
+            child: const Text('Update'),
+          ),
+          TextButton(
+            onPressed: _clearApiKey,
+            child: const Text('Clear'),
           ),
         ],
       ),

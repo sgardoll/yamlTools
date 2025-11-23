@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Manager for storing and retrieving application preferences
@@ -8,29 +10,75 @@ class PreferencesManager {
   static const String _recentProjectsKey = 'recent_projects';
   static const String _yamlSourceUrlKey = 'yaml_source_url';
   static const int _maxRecentProjects = 10;
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   /// Saves the API key to persistent storage
   static Future<bool> saveApiKey(String apiKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.setString(_apiKeyKey, apiKey);
+    try {
+      await _secureStorage.write(key: _apiKeyKey, value: apiKey);
+      return true;
+    } catch (e) {
+      debugPrint('Failed to save API key securely: $e');
+      return false;
+    }
   }
 
   /// Retrieves the stored API key
   static Future<String?> getApiKey() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_apiKeyKey);
+    try {
+      final secureValue = await _secureStorage.read(key: _apiKeyKey);
+      if (secureValue != null && secureValue.isNotEmpty) {
+        return secureValue;
+      }
+
+      // Migrate any legacy value stored in SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final legacyValue = prefs.getString(_apiKeyKey);
+      if (legacyValue != null && legacyValue.isNotEmpty) {
+        await _secureStorage.write(key: _apiKeyKey, value: legacyValue);
+        await prefs.remove(_apiKeyKey);
+        return legacyValue;
+      }
+    } catch (e) {
+      debugPrint('Failed to read API key securely: $e');
+    }
+    return null;
   }
 
   /// Saves the OpenAI API key to persistent storage
   static Future<bool> saveOpenAIKey(String apiKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.setString(_openAIApiKeyKey, apiKey);
+    try {
+      await _secureStorage.write(key: _openAIApiKeyKey, value: apiKey);
+      return true;
+    } catch (e) {
+      debugPrint('Failed to save OpenAI key securely: $e');
+      return false;
+    }
   }
 
   /// Retrieves the stored OpenAI API key
   static Future<String?> getOpenAIKey() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_openAIApiKeyKey);
+    try {
+      final secureValue = await _secureStorage.read(key: _openAIApiKeyKey);
+      if (secureValue != null && secureValue.isNotEmpty) {
+        return secureValue;
+      }
+
+      // Migrate any legacy value stored in SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final legacyValue = prefs.getString(_openAIApiKeyKey);
+      if (legacyValue != null && legacyValue.isNotEmpty) {
+        await _secureStorage.write(
+          key: _openAIApiKeyKey,
+          value: legacyValue,
+        );
+        await prefs.remove(_openAIApiKeyKey);
+        return legacyValue;
+      }
+    } catch (e) {
+      debugPrint('Failed to read OpenAI key securely: $e');
+    }
+    return null;
   }
 
   /// Project entry for recent projects list
@@ -117,5 +165,33 @@ class PreferencesManager {
   static Future<String?> getYamlSourceUrl() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_yamlSourceUrlKey);
+  }
+
+  /// Clears only the FlutterFlow API key.
+  static Future<void> clearApiKey() async {
+    await _secureStorage.delete(key: _apiKeyKey);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_apiKeyKey);
+  }
+
+  /// Clears only the OpenAI API key.
+  static Future<void> clearOpenAIKey() async {
+    await _secureStorage.delete(key: _openAIApiKeyKey);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_openAIApiKeyKey);
+  }
+
+  /// Clears all persisted credentials (FlutterFlow + OpenAI) from secure and legacy storage.
+  static Future<void> clearCredentials() async {
+    try {
+      await _secureStorage.delete(key: _apiKeyKey);
+      await _secureStorage.delete(key: _openAIApiKeyKey);
+    } catch (e) {
+      debugPrint('Failed to clear secure credentials: $e');
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_apiKeyKey);
+    await prefs.remove(_openAIApiKeyKey);
   }
 }
