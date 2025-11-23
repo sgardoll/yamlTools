@@ -7,8 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import '../storage/preferences_manager.dart';
 import '../widgets/recent_projects_widget.dart';
-import '../widgets/yaml_tree_view.dart'; // Import our new tree view widget
-import '../widgets/diff_view_widget.dart'; // Import our diff view widget
 import '../widgets/app_header.dart';
 import '../widgets/project_header.dart';
 import '../widgets/yaml_content_viewer.dart';
@@ -61,7 +59,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, DateTime> _fileSyncTimestamps =
       {}; // Track when files were successfully synced to FlutterFlow
 
-  bool _showExportView = true; // Default to export view
   bool _isOutputExpanded = false; // For expandable output section
   bool _hasModifications = false; // Track if modifications have been made
   bool _showRecentProjects = false; // Whether to show recent projects panel
@@ -79,10 +76,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Project name for display in recent projects list
   String _projectName = "";
-
-  // Add a new state field to track which view is active
-  int _selectedViewIndex =
-      1; // 0: export view, 1: tree view (changed to default to tree view)
 
   // Add a new state field for loading indicator
   bool _isLoading = false;
@@ -1075,14 +1068,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (hasYaml)
                     ProjectHeader(
                       projectName: projectDisplayName,
-                      viewMode: _selectedViewIndex == 0
-                          ? 'edited_files'
-                          : 'tree_view',
-                      onViewModeChanged: (mode) {
-                        setState(() {
-                          _selectedViewIndex = mode == 'edited_files' ? 0 : 1;
-                        });
-                      },
                     ),
 
                   // Main content area
@@ -1097,21 +1082,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                 // Left panel - Tree or Files list
                                 Expanded(
                                   flex: 2,
-                                  child: _selectedViewIndex == 0
-                                      ? _buildExportFilesView()
-                                      : ModernYamlTree(
-                                          yamlFiles: _exportedFiles,
-                                          onFileSelected: (filePath) {
-                                            setState(() {
-                                              _selectedFilePath = filePath;
-                                            });
-                                          },
-                                          expandedNodes: _expandedFiles,
-                                          validationTimestamps:
-                                              _fileValidationTimestamps,
-                                          syncTimestamps: _fileSyncTimestamps,
-                                          updateTimestamps: _fileUpdateTimestamps,
-                                        ),
+                                  child: ModernYamlTree(
+                                    yamlFiles: _exportedFiles,
+                                    onFileSelected: (filePath) {
+                                      setState(() {
+                                        _selectedFilePath = filePath;
+                                      });
+                                    },
+                                    expandedNodes: _expandedFiles,
+                                    validationTimestamps:
+                                        _fileValidationTimestamps,
+                                    syncTimestamps: _fileSyncTimestamps,
+                                    updateTimestamps: _fileUpdateTimestamps,
+                                  ),
                                 ),
 
                                 const SizedBox(width: 16),
@@ -1352,531 +1335,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Existing method for the export files view
-  Widget _buildExportFilesView() {
-    // Use changedFiles if modifications were made, otherwise use exportedFiles
-    Map<String, String> filesToShow =
-        _hasModifications ? _changedFiles : _exportedFiles;
-
-    // Filter out system files that we're now showing in the top bar
-    Map<String, String> filteredFiles = Map.from(filesToShow);
-    filteredFiles.removeWhere((key, value) =>
-        key.contains('complete_raw.yaml') || key.contains('raw_project.yaml'));
-
-    // Make sure our key files are shown first
-    List<String> orderedKeys = filteredFiles.keys.toList();
-
-    // Add modified_yaml.yaml first if it exists
-    if (_hasModifications) {
-      orderedKeys.sort((a, b) {
-        // First check if files have validation timestamps - recently validated files go to top
-        DateTime? timestampA = _fileValidationTimestamps[a];
-        DateTime? timestampB = _fileValidationTimestamps[b];
-
-        if (timestampA != null && timestampB != null) {
-          // Both have timestamps, sort by most recent first
-          return timestampB.compareTo(timestampA);
-        } else if (timestampA != null) {
-          // Only A has timestamp, it goes first
-          return -1;
-        } else if (timestampB != null) {
-          // Only B has timestamp, it goes first
-          return 1;
-        }
-
-        // Neither has timestamp, fall back to original priority logic
-        // Give priority to the modified_yaml.yaml file
-        if (a == 'modified_yaml.yaml') return -1;
-        if (b == 'modified_yaml.yaml') return 1;
-        if (a == 'raw_output.yaml') return -1;
-        if (b == 'raw_output.yaml') return 1;
-        return a.compareTo(b);
-      });
-    } else {
-      orderedKeys.sort((a, b) {
-        // Show archive files first
-        if (a.startsWith('archive_') && !b.startsWith('archive_')) return -1;
-        if (!a.startsWith('archive_') && b.startsWith('archive_')) return 1;
-        return a.compareTo(b);
-      });
-    }
-
-    // Count modified files for the badge
-    int modifiedFilesCount = 0;
-    for (var fileName in orderedKeys) {
-      String content = filesToShow[fileName] ?? '';
-      print('DEBUG: Available file: $fileName (${content.length} chars)');
-
-      // Check if file is modified
-      if (_originalFiles.containsKey(fileName) &&
-          _originalFiles[fileName] != content) {
-        modifiedFilesCount++;
-      }
-    }
-
-    String statusMessage = "Found ${orderedKeys.length} files";
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Row(
-              children: [
-                Text(_hasModifications ? 'Changed Files' : 'Export Files',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                if (modifiedFilesCount > 0)
-                  Container(
-                    margin: EdgeInsets.only(left: 8),
-                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.amber,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '$modifiedFilesCount',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            SizedBox(width: 16),
-            Text(statusMessage,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-          ],
-        ),
-        SizedBox(height: 8),
-        Expanded(
-          child: filesToShow.isEmpty
-              ? Center(
-                  child: Text(
-                      'No YAML files available. ${_parsedYamlMap != null ? "Enter a prompt to make changes." : ""}'),
-                )
-              : ListView.builder(
-                  itemCount: orderedKeys.length,
-                  itemBuilder: (context, index) {
-                    String fileName = orderedKeys[index];
-
-                    // Skip compact treatment for system files since they're now in the top bar
-                    // if (fileName.contains('complete_raw.yaml') ||
-                    //     fileName.contains('raw_project.yaml')) {
-                    //   return _buildCompactFileCard(
-                    //       fileName, filesToShow[fileName] ?? '');
-                    // }
-
-                    String fileContent = filesToShow[fileName] ?? '';
-                    bool isExpanded = _expandedFiles.contains(fileName);
-
-                    // Debug file sizes
-                    print(
-                        'DEBUG: File "$fileName" size: ${fileContent.length} chars');
-
-                    // Determine if file was deleted
-                    bool isDeleted = fileContent ==
-                        "# This file was removed in the latest changes";
-
-                    // Highlight the complete raw file
-                    bool isCompleteRaw = fileName.contains('complete_raw.yaml');
-
-                    // Highlight archive files
-                    bool isArchiveFile = fileName.startsWith('archive_');
-
-                    // Prepare or get a TextEditingController for this file if needed
-                    if (!_fileControllers.containsKey(fileName)) {
-                      _fileControllers[fileName] =
-                          TextEditingController(text: fileContent);
-                    }
-
-                    bool isEditing = _fileEditModes[fileName] == true;
-                    bool wasModified = _originalFiles.containsKey(fileName) &&
-                        _originalFiles[fileName] != fileContent;
-
-                    // Get background color based on file type and modified status
-                    Color? bgColor;
-                    if (isDeleted) {
-                      bgColor = Colors.red[50];
-                    } else if (wasModified) {
-                      bgColor = Colors.amber[50]; // Modified files are amber
-                    } else if (isArchiveFile) {
-                      bgColor = Colors.green[50];
-                    } else if (isCompleteRaw) {
-                      bgColor = Colors.blue[50];
-                    }
-
-                    return Card(
-                      margin: EdgeInsets.only(bottom: 16),
-                      // Highlight based on file type and status
-                      color: bgColor,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          InkWell(
-                            onTap: () {
-                              setState(() {
-                                if (isExpanded) {
-                                  _expandedFiles.remove(fileName);
-                                } else {
-                                  _expandedFiles.add(fileName);
-                                }
-                              });
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          isExpanded
-                                              ? Icons.expand_less
-                                              : Icons.expand_more,
-                                          color: wasModified
-                                              ? Colors.amber[800]
-                                              : (isArchiveFile
-                                                  ? Colors.green[800]
-                                                  : (isCompleteRaw
-                                                      ? Colors.blue[800]
-                                                      : null)),
-                                        ),
-                                        SizedBox(width: 8),
-                                        Expanded(
-                                          child: Row(
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  isArchiveFile
-                                                      ? fileName.replaceFirst(
-                                                          'archive_', '')
-                                                      : fileName,
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    color: isDeleted
-                                                        ? Colors.red
-                                                        : (wasModified
-                                                            ? Colors.amber[800]
-                                                            : (isArchiveFile
-                                                                ? Colors
-                                                                    .green[800]
-                                                                : (isCompleteRaw
-                                                                    ? Colors
-                                                                        .blue[800]
-                                                                    : null))),
-                                                  ),
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                              Text(
-                                                ' (${fileContent.length} chars)',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.grey[600],
-                                                ),
-                                              ),
-                                              if (wasModified)
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          left: 4.0),
-                                                  child: Icon(
-                                                    Icons.edit_document,
-                                                    size: 16,
-                                                    color: Colors.amber[800],
-                                                  ),
-                                                ),
-                                              // Show the most recent status indicator only
-                                              // Priority: Synced > Updated > Valid
-                                              if (_fileSyncTimestamps
-                                                  .containsKey(fileName))
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          left: 4.0),
-                                                  child:
-                                                      _buildSyncedTickIndicator(),
-                                                )
-                                              else if (_fileUpdateTimestamps
-                                                  .containsKey(fileName))
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          left: 4.0),
-                                                  child: Tooltip(
-                                                    message:
-                                                        'Recently updated locally',
-                                                    child: Container(
-                                                      padding:
-                                                          EdgeInsets.symmetric(
-                                                              horizontal: 4,
-                                                              vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.blue[100],
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(6),
-                                                        border: Border.all(
-                                                            color: Colors
-                                                                .blue[300]!,
-                                                            width: 1),
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons.edit,
-                                                            size: 12,
-                                                            color: Colors
-                                                                .blue[700],
-                                                          ),
-                                                          SizedBox(width: 2),
-                                                          Text(
-                                                            'Updated',
-                                                            style: TextStyle(
-                                                              fontSize: 9,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .bold,
-                                                              color: Colors
-                                                                  .blue[800],
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                )
-                                              else if (_fileValidationTimestamps
-                                                  .containsKey(fileName))
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          left: 4.0),
-                                                  child: Tooltip(
-                                                    message:
-                                                        'Recently validated',
-                                                    child: Container(
-                                                      padding:
-                                                          EdgeInsets.symmetric(
-                                                              horizontal: 4,
-                                                              vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color:
-                                                            Colors.green[100],
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(6),
-                                                        border: Border.all(
-                                                            color: Colors
-                                                                .green[300]!,
-                                                            width: 1),
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons.verified,
-                                                            size: 12,
-                                                            color: Colors
-                                                                .green[700],
-                                                          ),
-                                                          SizedBox(width: 2),
-                                                          Text(
-                                                            'Valid',
-                                                            style: TextStyle(
-                                                              fontSize: 9,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .bold,
-                                                              color: Colors
-                                                                  .green[800],
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Row(
-                                    children: [
-                                      // Allow editing for all files when expanded
-                                      if (isExpanded)
-                                        isEditing
-                                            ? ElevatedButton.icon(
-                                                icon: const Icon(Icons.save,
-                                                    size: 14),
-                                                label: const Text('Save'),
-                                                style: _getFileButtonStyle(
-                                                    backgroundColor:
-                                                        AppTheme.successColor),
-                                                onPressed: () async {
-                                                  await _applyFileChanges(
-                                                    fileName,
-                                                    _fileControllers[fileName]!
-                                                        .text,
-                                                    validated: false,
-                                                  );
-                                                  setState(() {
-                                                    _fileEditModes[fileName] =
-                                                        false;
-                                                  });
-                                                  // Guide users to validate & sync via the right panel
-                                                  ScaffoldMessenger.of(context)
-                                                    ..hideCurrentSnackBar()
-                                                    ..showSnackBar(
-                                                      SnackBar(
-                                                        content: Text(
-                                                          'Saved locally. Select the file on the right and press Save to validate and sync to FlutterFlow.',
-                                                        ),
-                                                        duration: Duration(seconds: 4),
-                                                      ),
-                                                    );
-                                                },
-                                              )
-                                            : ElevatedButton.icon(
-                                                icon: const Icon(Icons.edit,
-                                                    size: 14),
-                                                label: const Text('Edit'),
-                                                style: _getFileButtonStyle(
-                                                    backgroundColor:
-                                                        AppTheme.primaryColor),
-                                                onPressed: () {
-                                                  // Enter edit mode
-                                                  setState(() {
-                                                    _fileEditModes[fileName] =
-                                                        true;
-                                                    _fileControllers[fileName]!
-                                                        .text = fileContent;
-                                                  });
-                                                },
-                                              ),
-                                      // Copy button
-                                      ElevatedButton.icon(
-                                        icon: const Icon(Icons.copy, size: 14),
-                                        label: const Text('Copy'),
-                                        style: _getFileButtonStyle(),
-                                        onPressed: () {
-                                          _fallbackClipboardCopy(
-                                              context, fileName, fileContent);
-                                        },
-                                      ),
-                                      const SizedBox(width: 8),
-                                      // Make View button more prominent
-                                      ElevatedButton.icon(
-                                        icon: const Icon(Icons.visibility,
-                                            size: 14),
-                                        label: const Text('View'),
-                                        style: _getFileButtonStyle(
-                                            backgroundColor:
-                                                AppTheme.successColor),
-                                        onPressed: () {
-                                          // Switch to tree view and select this file
-                                          setState(() {
-                                            _selectedViewIndex =
-                                                1; // Switch to tree view
-                                            _expandedFiles.add(
-                                                fileName); // Mark as expanded
-                                          });
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          if (isExpanded) ...[
-                            Divider(height: 1),
-                            Container(
-                              // More flexible height based on content
-                              constraints: BoxConstraints(
-                                minHeight: 150,
-                                maxHeight: 300,
-                              ),
-                              padding: EdgeInsets.all(8.0),
-                              color: isDeleted
-                                  ? Colors.red[50]
-                                  : (wasModified
-                                      ? Colors.amber[50]
-                                      : (isArchiveFile
-                                          ? Colors.green[50]
-                                          : (isCompleteRaw
-                                              ? Colors.blue[50]
-                                              : Colors.grey[50]))),
-                              child: isEditing
-                                  ? TextField(
-                                      controller: _fileControllers[fileName],
-                                      maxLines: null,
-                                      decoration: InputDecoration(
-                                        border: InputBorder.none,
-                                        hintText: 'Edit YAML content...',
-                                      ),
-                                      style: TextStyle(
-                                        fontFamily: 'monospace',
-                                        fontSize: 14,
-                                      ),
-                                    )
-                                  : wasModified
-                                      ? DiffViewWidget(
-                                          originalContent:
-                                              _originalFiles[fileName] ?? '',
-                                          modifiedContent: fileContent,
-                                          fileName: fileName,
-                                          onClose: () {
-                                            setState(() {
-                                              _expandedFiles.remove(fileName);
-                                            });
-                                          },
-                                        )
-                                      : GestureDetector(
-                                          onTap: () {
-                                            // Enter edit mode when text is clicked
-                                            setState(() {
-                                              _fileEditModes[fileName] = true;
-                                              _fileControllers[fileName]!.text =
-                                                  fileContent;
-                                            });
-                                          },
-                                          child: Container(
-                                            color: Colors
-                                                .transparent, // Makes the entire area tappable
-                                            width: double.infinity,
-                                            child: SingleChildScrollView(
-                                              child: Text(
-                                                fileContent,
-                                                style: TextStyle(
-                                                    fontFamily: 'monospace'),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
   // Helper to export YAML to multiple files
   void _prepareFilesForExport() {
     if (_parsedYamlMap == null && _exportedFiles.isEmpty) return;
@@ -2081,19 +1539,8 @@ class _HomeScreenState extends State<HomeScreen> {
     print(
         "Original files: ${_originalFiles.length}, Export files: ${_exportedFiles.length}, Changed files: ${_changedFiles.length}");
 
-    setState(() {
-      _showExportView = true;
-    });
-
     // Auto-expand important files after they're loaded
     _autoExpandImportantFiles();
-  }
-
-  // Toggle between export view and normal view
-  void _toggleExportView() {
-    setState(() {
-      _showExportView = !_showExportView;
-    });
   }
 
   // Helper method to use Flutter's clipboard
@@ -2182,11 +1629,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // Refresh view
-    setState(() {
-      _selectedViewIndex = 1; // Tree view
-    });
-
     // Notify user to review and save each file to validate & sync
     try {
       final appliedFiles = change.modifications
@@ -2234,7 +1676,6 @@ class _HomeScreenState extends State<HomeScreen> {
         } else {
           _fileControllers[existingFile]!.text = yamlContent;
         }
-        _selectedViewIndex = 1;
       });
     } else {
       // Create a new file with AI-generated content
@@ -2255,7 +1696,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _expandedFiles.add(fileName);
         _selectedFilePath = fileName;
         _fileControllers[fileName] = TextEditingController(text: yamlContent);
-        _selectedViewIndex = 1;
       });
     }
   }
