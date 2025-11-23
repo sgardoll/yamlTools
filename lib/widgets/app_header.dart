@@ -53,16 +53,28 @@ class AppHeader extends StatelessWidget {
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withOpacity(0.1),
-                      offset: Offset(0, 2),
+                      offset: const Offset(0, 2),
                       blurRadius: 4,
                     ),
                   ],
                 ),
-                child: const Center(
-                  child: Icon(
-                    Icons.code,
-                    color: Color(0xFF4F46E5),
-                    size: 20,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: Image.asset(
+                      'assets/app_logo.png',
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return const Center(
+                          child: Icon(
+                            Icons.code,
+                            color: Color(0xFF4F46E5),
+                            size: 20,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),

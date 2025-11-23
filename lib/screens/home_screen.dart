@@ -33,6 +33,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Path to the hero image shown on the load screen. Upload your image to
+  // Dreamflow's Assets panel and name or place it at this path.
+  // Intro logo shown above the "Load FlutterFlow Project" title on the home screen
+  static const String _heroImagePath = 'assets/intro_logo.png';
   static const String _flutterFlowDocsUrl =
       'https://docs.flutterflow.io/api-and-integrations/flutterflow-api';
   // 1. Declare ALL state fields and controllers here:
@@ -495,6 +499,96 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_exportedFiles.containsKey('complete_raw.yaml')) {
       _expandedFiles.add('complete_raw.yaml');
     }
+  }
+
+  // Build the fallback logo shown when a custom asset is not available.
+  Widget _buildFallbackLogo() {
+    return Stack(
+      children: [
+        // FlutterFlow-style logo design
+        Positioned(
+          top: 12,
+          left: 12,
+          child: Container(
+            width: 16,
+            height: 16,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.9),
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 20,
+          left: 32,
+          child: Container(
+            width: 20,
+            height: 12,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.7),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 36,
+          left: 16,
+          child: Container(
+            width: 32,
+            height: 8,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+        // Central "F" for FlutterFlow
+        const Center(
+          child: Text(
+            'F',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Build the hero logo container that tries to render a custom asset first,
+  // and falls back to a styled placeholder if the asset is missing.
+  Widget _buildHeroLogo() {
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF4F46E5), Color(0xFF3B82F6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryColor.withOpacity(0.2),
+            offset: const Offset(0, 4),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Image.asset(
+          _heroImagePath,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return _buildFallbackLogo();
+          },
+        ),
+      ),
+    );
   }
 
   Widget _buildSyncedTickIndicator() {
@@ -1114,77 +1208,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 // Header section
                 Column(
                   children: [
-                    Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF4F46E5), Color(0xFF3B82F6)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primaryColor.withOpacity(0.2),
-                            offset: Offset(0, 4),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: Stack(
-                        children: [
-                          // FlutterFlow-style logo design
-                          Positioned(
-                            top: 12,
-                            left: 12,
-                            child: Container(
-                              width: 16,
-                              height: 16,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.9),
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 20,
-                            left: 32,
-                            child: Container(
-                              width: 20,
-                              height: 12,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.7),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 36,
-                            left: 16,
-                            child: Container(
-                              width: 32,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.8),
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                          ),
-                          // Central "F" for FlutterFlow
-                          Center(
-                            child: Text(
-                              'F',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    _buildHeroLogo(),
                     const SizedBox(height: 16),
                     Text(
                       'Load FlutterFlow Project',
