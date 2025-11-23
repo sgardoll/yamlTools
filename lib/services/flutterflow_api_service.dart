@@ -24,8 +24,6 @@ class FlutterFlowApiService {
       throw ArgumentError('File content map cannot be empty');
     }
 
-    final url = '$_baseUrl/updateProjectYaml';
-
     final body = jsonEncode({
       'projectId': projectId,
       'fileKeyToContent': fileKeyToContent,
@@ -39,8 +37,12 @@ class FlutterFlowApiService {
     });
 
     try {
-      final response = await http.post(
-        Uri.parse(url),
+      // Primary endpoint per updated FlutterFlow API docs
+      final primaryUri = Uri.parse('$_baseUrl/updateProjectByYaml');
+      print('Attempting YAML update via: $primaryUri (method: POST)');
+
+      final primaryResponse = await http.post(
+        primaryUri,
         headers: {
           'Authorization': 'Bearer $apiToken',
           'Content-Type': 'application/json',
@@ -49,17 +51,66 @@ class FlutterFlowApiService {
         body: body,
       );
 
-      print('Update YAML response status: ${response.statusCode}');
+      print(
+          'Primary update response status: ${primaryResponse.statusCode}');
+      print('Primary update response body: ${primaryResponse.body}');
 
-      if (response.statusCode == 200) {
-        print('Successfully updated project YAML');
+      if (primaryResponse.statusCode == 200) {
+        print('Successfully updated project YAML via primary endpoint');
         return true;
-      } else {
-        final responseBody = response.body;
-        print('Failed to update project YAML: $responseBody');
-        throw Exception(
-            'Failed to update project YAML: ${response.statusCode} - $responseBody');
       }
+
+      // Fallback PUT endpoint for older API paths
+      final fallbackPutUri = Uri.parse('$_baseUrl/projectYaml');
+      print(
+          'Primary endpoint failed. Trying fallback endpoint: $fallbackPutUri (method: PUT)');
+
+      final fallbackPutResponse = await http.put(
+        fallbackPutUri,
+        headers: {
+          'Authorization': 'Bearer $apiToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: body,
+      );
+
+      print('Fallback PUT response status: ${fallbackPutResponse.statusCode}');
+      print('Fallback PUT response body: ${fallbackPutResponse.body}');
+
+      if (fallbackPutResponse.statusCode == 200) {
+        print('Successfully updated project YAML via fallback PUT endpoint');
+        return true;
+      }
+
+      // Legacy POST endpoint for even older API paths
+      final legacyUri = Uri.parse('$_baseUrl/updateProjectYaml');
+      print('Fallback PUT failed. Trying legacy endpoint: $legacyUri');
+
+      final legacyResponse = await http.post(
+        legacyUri,
+        headers: {
+          'Authorization': 'Bearer $apiToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: body,
+      );
+
+      print('Legacy update response status: ${legacyResponse.statusCode}');
+      print('Legacy update response body: ${legacyResponse.body}');
+
+      if (legacyResponse.statusCode == 200) {
+        print('Successfully updated project YAML via legacy endpoint');
+        return true;
+      }
+
+      throw Exception(
+        'Failed to update project YAML. Primary status: '
+        '${primaryResponse.statusCode}, Fallback PUT status: '
+        '${fallbackPutResponse.statusCode}, Legacy status: '
+        '${legacyResponse.statusCode}. Last body: ${legacyResponse.body}',
+      );
     } catch (e) {
       print('Error updating project YAML: $e');
       throw Exception('Network error while updating project YAML: $e');

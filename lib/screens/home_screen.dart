@@ -32,6 +32,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const String _flutterFlowDocsUrl =
+      'https://docs.flutterflow.io/api-and-integrations/flutterflow-api';
   // 1. Declare ALL state fields and controllers here:
   String? _rawFetchedYaml;
   Map<String, dynamic>? _parsedYamlMap;
@@ -91,6 +93,54 @@ class _HomeScreenState extends State<HomeScreen> {
   // Helper to safely call setState only if widget is still mounted
   void setStateIfMounted(VoidCallback fn) {
     if (mounted) setState(fn);
+  }
+
+  void _handleYamlFetchError(String message, {bool clearRawContent = false}) {
+    final messageWithDocs =
+        '$message\n\nNeed help? Review the FlutterFlow API docs: $_flutterFlowDocsUrl';
+
+    setStateIfMounted(() {
+      _generatedYamlMessage = messageWithDocs;
+      if (clearRawContent) {
+        _rawFetchedYaml = null;
+        _parsedYamlMap = null;
+      }
+    });
+
+    if (!mounted) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(messageWithDocs),
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: 'Copy Link',
+            textColor: AppTheme.primaryColor,
+            onPressed: () {
+              Clipboard.setData(
+                const ClipboardData(text: _flutterFlowDocsUrl),
+              );
+              if (!mounted) {
+                return;
+              }
+              final confirmationMessenger = ScaffoldMessenger.of(context);
+              confirmationMessenger
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  const SnackBar(
+                    content: Text('Documentation link copied to clipboard'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+            },
+          ),
+        ),
+      );
   }
 
   // Helper to convert YamlMap/YamlList to Dart Map/List
@@ -398,11 +448,10 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             }
           } on FormatException catch (e) {
-            setState(() {
-              _generatedYamlMessage =
-                  'Error: API response is not valid JSON.\nDetails: $e';
-              _rawFetchedYaml = null;
-            });
+            _handleYamlFetchError(
+              'Error: API response is not valid JSON.\nDetails: $e',
+              clearRawContent: true,
+            );
             print('JSON Parsing Error: $e');
             return;
           }
@@ -426,20 +475,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 print(
                     'DEBUG_LOG: project_yaml_bytes length is multiple of 4: ${projectYamlBytesString.length % 4 == 0}');
                 int paddingChars = 0;
-                if (projectYamlBytesString.endsWith('=='))
+                if (projectYamlBytesString.endsWith('==')) {
                   paddingChars = 2;
-                else if (projectYamlBytesString.endsWith('=')) paddingChars = 1;
+                } else if (projectYamlBytesString.endsWith('=')) {
+                  paddingChars = 1;
+                }
                 print(
                     'DEBUG_LOG: project_yaml_bytes padding characters: $paddingChars');
               } else {
                 print(
                     'DEBUG_LOG: project_yaml_bytes key within "value" object is not a String or is null. Actual type: ${projectYamlBytesField?.runtimeType}');
                 if (mounted) {
-                  setState(() {
-                    _generatedYamlMessage =
-                        'Error: Unexpected data type for project YAML content in API response.';
-                    _rawFetchedYaml = null;
-                  });
+                  _handleYamlFetchError(
+                    'Error: Unexpected data type for project YAML content in API response.',
+                    clearRawContent: true,
+                  );
                 }
                 return;
               }
@@ -447,11 +497,10 @@ class _HomeScreenState extends State<HomeScreen> {
               print(
                   'DEBUG_LOG: "value" key not found in JSON response, or it is not a Map. Actual type: ${valueField?.runtimeType}');
               if (mounted) {
-                setState(() {
-                  _generatedYamlMessage =
-                      'Error: Unexpected API response structure (missing or invalid "value" object).';
-                  _rawFetchedYaml = null;
-                });
+                _handleYamlFetchError(
+                  'Error: Unexpected API response structure (missing or invalid "value" object).',
+                  clearRawContent: true,
+                );
               }
               return;
             }
@@ -462,14 +511,17 @@ class _HomeScreenState extends State<HomeScreen> {
               print(
                   'DEBUG_LOG: project_yaml_bytes string is null or empty after attempted extraction.');
               if (mounted) {
-                setState(() {
-                  // Avoid overwriting more specific messages if they were already set
-                  if (_generatedYamlMessage.startsWith("Fetching YAML...")) {
-                    _generatedYamlMessage =
-                        "Error: Failed to extract YAML content string from API response.";
-                  }
-                  _rawFetchedYaml = null;
-                });
+                if (_generatedYamlMessage.startsWith('Fetching YAML...')) {
+                  _handleYamlFetchError(
+                    'Error: Failed to extract YAML content string from API response.',
+                    clearRawContent: true,
+                  );
+                } else {
+                  setStateIfMounted(() {
+                    _rawFetchedYaml = null;
+                    _parsedYamlMap = null;
+                  });
+                }
               }
               return;
             }
@@ -479,11 +531,10 @@ class _HomeScreenState extends State<HomeScreen> {
               decodedZipBytes = base64Decode(
                   projectYamlBytesString); // Use the extracted and validated string
             } on FormatException catch (e) {
-              setState(() {
-                _generatedYamlMessage =
-                    'Error: Failed to decode YAML data from API response (Base64 decoding failed).\nDetails: $e';
-                _rawFetchedYaml = null;
-              });
+              _handleYamlFetchError(
+                'Error: Failed to decode YAML data from API response (Base64 decoding failed).\nDetails: $e',
+                clearRawContent: true,
+              );
               print('Base64 Decoding Error: $e');
               return;
             }
@@ -552,30 +603,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   'DEBUG: Original raw YAML file size: ${_rawFetchedYaml?.length ?? 0} chars');
 
               if (_rawFetchedYaml == null || _rawFetchedYaml!.trim().isEmpty) {
-                setState(() {
-                  _generatedYamlMessage =
-                      'Error: Extracted YAML file is empty or contains only whitespace.';
-                  _rawFetchedYaml = null;
-                });
+                _handleYamlFetchError(
+                  'Error: Extracted YAML file is empty or contains only whitespace.',
+                  clearRawContent: true,
+                );
               } else {
                 // Store the raw YAML directly - don't rely on parsing
                 _exportedFiles['complete_raw.yaml'] = _rawFetchedYaml!;
                 _parseFetchedYaml();
               }
             } else {
-              setState(() {
-                _generatedYamlMessage =
-                    'Error: No ".yaml" file (e.g., project.yaml) found in the downloaded ZIP archive.';
-                _rawFetchedYaml = null;
-              });
+              _handleYamlFetchError(
+                'Error: No ".yaml" file (e.g., project.yaml) found in the downloaded ZIP archive.',
+                clearRawContent: true,
+              );
             }
           } else {
             print('DEBUG_LOG: Parsed JSON is not a Map.');
-            setState(() {
-              _generatedYamlMessage =
-                  'Error: API response format is not a valid JSON object.';
-              _rawFetchedYaml = null;
-            });
+            _handleYamlFetchError(
+              'Error: API response format is not a valid JSON object.',
+              clearRawContent: true,
+            );
             return;
           }
         } on ArchiveException catch (e) {
@@ -603,9 +651,10 @@ class _HomeScreenState extends State<HomeScreen> {
             userErrorMessage =
                 'Error: The fetched YAML package starts correctly but appears to be incomplete or corrupted, as the End of Central Directory Record could not be found. This usually means the data is truncated. Please check the data source or try again.';
           }
-          setStateIfMounted(() {
-            _generatedYamlMessage = userErrorMessage;
-          });
+          _handleYamlFetchError(
+            userErrorMessage,
+            clearRawContent: true,
+          );
         }
       } else {
         String errorMsg;
@@ -631,17 +680,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   'Error fetching YAML: Unexpected network error (${response.statusCode}). Details: ${response.body}';
             }
         }
-        setState(() {
-          _generatedYamlMessage = errorMsg;
-        });
+        _handleYamlFetchError(
+          errorMsg,
+          clearRawContent: true,
+        );
         print('Error fetching YAML (${response.statusCode}): ${response.body}');
       }
     } catch (e) {
-      setState(() {
+      setStateIfMounted(() {
         _isLoading = false; // Set loading to false on error
-        _generatedYamlMessage =
-            'Failed to connect to the server. Please check your internet connection and try again.\nDetails: $e';
       });
+      _handleYamlFetchError(
+        'Failed to connect to the server. Please check your internet connection and try again.\nDetails: $e',
+        clearRawContent: true,
+      );
       print('Exception caught during YAML fetch: $e');
       return;
     }
@@ -696,31 +748,27 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         } else {
           _parsedYamlMap = null;
-          setState(() {
-            _generatedYamlMessage =
-                'Error: Could not convert fetched YAML to a readable map format.';
-          });
+          _handleYamlFetchError(
+            'Error: Could not convert fetched YAML to a readable map format.',
+          );
         }
       } else {
         _parsedYamlMap = null;
-        setState(() {
-          _generatedYamlMessage =
-              'Error: Fetched data is not in the expected YAML map format. It should be a structured object (key-value pairs).';
-        });
+        _handleYamlFetchError(
+          'Error: Fetched data is not in the expected YAML map format. It should be a structured object (key-value pairs).',
+        );
       }
     } on YamlException catch (e) {
       _parsedYamlMap = null;
-      setState(() {
-        _generatedYamlMessage =
-            'Error: The fetched YAML has an invalid format and could not be read.\nDetails: $e';
-      });
+      _handleYamlFetchError(
+        'Error: The fetched YAML has an invalid format and could not be read.\nDetails: $e',
+      );
       print('YamlException during parsing: $e');
     } catch (e) {
       _parsedYamlMap = null;
-      setState(() {
-        _generatedYamlMessage =
-            'An unexpected error occurred while reading the YAML structure.\nDetails: $e';
-      });
+      _handleYamlFetchError(
+        'An unexpected error occurred while reading the YAML structure.\nDetails: $e',
+      );
       print('Unexpected error during YAML parsing: $e');
     }
   }
