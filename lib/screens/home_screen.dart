@@ -34,7 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Path to the hero image shown on the load screen. Upload your image to
   // Dreamflow's Assets panel and name or place it at this path.
   // Intro logo shown above the "Load FlutterFlow Project" title on the home screen
-  static const String _heroImagePath = 'assets/intro_logo.png';
+  static const String _heroImagePath = 'assets/images/intro_logo.png';
   static const String _flutterFlowDocsUrl =
       'https://docs.flutterflow.io/api-and-integrations/flutterflow-api';
   // 1. Declare ALL state fields and controllers here:

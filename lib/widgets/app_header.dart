@@ -63,7 +63,7 @@ class AppHeader extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(4.0),
                     child: Image.asset(
-                      'assets/app_logo.png',
+                      'assets/images/app_logo.png',
                       fit: BoxFit.contain,
                       errorBuilder: (context, error, stackTrace) {
                         return const Center(
