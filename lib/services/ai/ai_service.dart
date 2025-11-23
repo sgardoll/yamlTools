@@ -8,6 +8,42 @@ class AIService {
   final String apiKey;
   late final OpenAIClient _client;
 
+<<<<<<< ours
+  static const String _primaryModel = "gpt-5.1";
+  static const String _fallbackModel = "gpt-4o";
+  static const Map<String, dynamic> _responseFormat = {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "proposed_change",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "summary": {"type": "string"},
+          "modifications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filePath": {"type": "string"},
+                "newContent": {"type": "string"},
+                "isNewFile": {"type": "boolean"},
+                "touchedPaths": {
+                  "type": "array",
+                  "items": {"type": "string"}
+                }
+              },
+              "required": ["filePath", "newContent", "isNewFile"]
+            }
+          }
+        },
+        "required": ["summary", "modifications"]
+      },
+      "strict": true
+    }
+  };
+
+=======
+>>>>>>> theirs
   AIService(this.apiKey) {
     _client = OpenAIClient(apiKey: apiKey);
   }
