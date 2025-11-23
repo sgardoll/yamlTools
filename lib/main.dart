@@ -1,9 +1,50 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart'; // Assuming HomeScreen will be in lib/screens
 import 'theme/app_theme.dart';
 
+bool _isIgnorableInspectorError(FlutterErrorDetails details) {
+  try {
+    final msg = details.exceptionAsString();
+    final stackStr = details.stack?.toString() ?? '';
+    // Narrow filter: only ignore the known DevTools inspector selection error
+    // that occurs right after hot reload when a stale inspector node id is restored.
+    if (msg.contains('Id does not exist') &&
+        (stackStr.contains('service extension') || stackStr.contains('toObject'))) {
+      return true;
+    }
+  } catch (_) {
+    // Fall through to not ignore if anything unexpected happens
+  }
+  return false;
+}
+
 void main() {
-  runApp(const MyApp());
+  // Catch framework errors early and filter the specific noisy inspector error.
+  FlutterError.onError = (FlutterErrorDetails details) {
+    if (_isIgnorableInspectorError(details)) {
+      debugPrint('Ignored DevTools inspector selection error after hot reload: '
+          '${details.exceptionAsString()}');
+      return;
+    }
+    FlutterError.presentError(details);
+  };
+
+  // Also guard async errors that may bubble outside of FlutterError.
+  runZonedGuarded(() {
+    runApp(const MyApp());
+  }, (Object error, StackTrace stack) {
+    final msg = error.toString();
+    if (msg.contains('Id does not exist') &&
+        (stack.toString().contains('service extension') ||
+            stack.toString().contains('toObject'))) {
+      debugPrint('Ignored DevTools inspector selection error (zoned) after hot reload: '
+          '$error');
+      return;
+    }
+    debugPrint('Uncaught zone error: $error');
+  });
 }
 
 class MyApp extends StatelessWidget {

@@ -138,7 +138,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       // Extract file key from the file path using the same method as update
       final fileKey = FlutterFlowApiService.getFileKey(widget.filePath);
 
-      print('Validating file: ${widget.filePath} -> key: "$fileKey"');
+      debugPrint('Validating file: ${widget.filePath} -> key: "$fileKey"');
 
       // Create request payload
       final requestBody = json.encode({
@@ -150,7 +150,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       // For web, we're using a CORS proxy initialized in index.html
       final apiUrl =
           'https://api.flutterflow.io/v2-staging/validateProjectYaml';
-      print('Sending validation request to: $apiUrl');
+      debugPrint('Sending validation request to: $apiUrl');
 
       final response = await http.post(
         Uri.parse(apiUrl),
@@ -165,8 +165,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         body: requestBody,
       );
 
-      print('Validation response status: ${response.statusCode}');
-      print('Validation response body: ${response.body}');
+      debugPrint('Validation response status: ${response.statusCode}');
+      debugPrint('Validation response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -176,34 +176,31 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             _validationError = null;
           });
         } else {
-          final errorMsg = data['error'] ?? 'Invalid YAML format';
+          final errorMsg = (data['error'] ?? data['message'] ?? 'Invalid YAML format').toString();
           setState(() {
             _isValid = false;
-            _validationError = '❌ Validation Error: $errorMsg';
+            _validationError = _formatValidationMessage(errorMsg);
           });
         }
       } else if (response.statusCode == 400) {
         // Parse detailed validation errors
         try {
           final errorData = json.decode(response.body);
-          String detailedError = 'YAML Validation Failed:\n';
-
-          if (errorData['error'] != null) {
-            detailedError += '• ${errorData['error']}\n';
-          }
-          if (errorData['message'] != null) {
-            detailedError += '• ${errorData['message']}\n';
-          }
-
+          final combined = [
+            if (errorData['error'] != null) errorData['error'].toString(),
+            if (errorData['message'] != null) errorData['message'].toString(),
+          ].where((e) => e.trim().isNotEmpty).join('\n');
           setState(() {
             _isValid = false;
-            _validationError = detailedError.trim();
+            _validationError = _formatValidationMessage(
+              combined.isEmpty ? response.body : combined,
+            );
           });
         } catch (e) {
           setState(() {
             _isValid = false;
-            _validationError =
-                '❌ Validation failed (HTTP ${response.statusCode}): ${response.body}';
+            _validationError = _formatValidationMessage(
+                'Validation failed (HTTP ${response.statusCode}): ${response.body}');
           });
         }
       } else if (response.statusCode == 401) {
@@ -226,7 +223,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         });
       }
     } catch (e) {
-      print('Validation error: $e');
+      debugPrint('Validation error: $e');
       setState(() {
         _isValid = false;
         _validationError =
@@ -254,7 +251,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       // Get the API token from storage
       final apiToken = await PreferencesManager.getApiKey();
       if (apiToken == null || apiToken.isEmpty) {
-        print('API token not found for update');
+        debugPrint('API token not found for update');
         setState(() {
           _validationError =
               '🔑 API token missing for update. Please set your FlutterFlow API token.';
@@ -289,60 +286,45 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         widget.onFileUpdated!(widget.filePath);
       }
     } catch (e) {
-      print('Error updating file via API: $e');
+      debugPrint('Error updating file via API: $e');
 
       // Parse the error message for better user communication
       String userFriendlyError;
-      String errorString = e.toString();
+      final errorString = e.toString();
 
-      if (errorString.contains('400')) {
+      if (e is FlutterFlowApiException) {
+        final status = e.statusCode;
+        if (e.isNetworkError) {
+          userFriendlyError = '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
+        } else if (status != null && status >= 400 && status < 500) {
+          final bodyText = (e.body ?? e.message);
+          userFriendlyError = _formatValidationMessage(bodyText);
+        } else if (status == 401) {
+          userFriendlyError = '🔑 Authentication Error: Invalid API token. Please check your credentials.';
+        } else if (status == 403) {
+          userFriendlyError = '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
+        } else if (status == 404) {
+          userFriendlyError = '🔍 Project Not Found: Check your project ID or API token.';
+        } else {
+          userFriendlyError = '⚠️ Update Failed (${e.statusCode ?? 'unknown'}): ${e.message}';
+        }
+      } else if (errorString.contains('400')) {
         // Parse specific 400 errors
         if (errorString.contains('Expected int or stringified int')) {
-          userFriendlyError =
-              '🔢 YAML Error: Expected a number or quoted number. Check your YAML syntax for numeric values.';
+          userFriendlyError = '🔢 YAML Error: Expected a number or quoted number. Check your YAML syntax for numeric values.';
         } else if (errorString.contains('Invalid file key')) {
-          userFriendlyError =
-              '🗂️ File Error: Invalid file path for FlutterFlow. This file may not be supported.';
-        } else if (errorString.contains('(')) {
-          // Try to extract line/column info: "(2:3)"
-          final lineColMatch =
-              RegExp(r'\((\d+):(\d+)\)').firstMatch(errorString);
-          if (lineColMatch != null) {
-            final line = lineColMatch.group(1);
-            final col = lineColMatch.group(2);
-            userFriendlyError =
-                '📍 YAML Syntax Error at Line $line, Column $col:\n';
-
-            if (errorString.contains('Expected int')) {
-              userFriendlyError += '• Expected a number or quoted number\n';
-            } else if (errorString.contains('mapping')) {
-              userFriendlyError +=
-                  '• YAML structure error - check indentation\n';
-            } else {
-              userFriendlyError += '• Invalid YAML syntax\n';
-            }
-            userFriendlyError +=
-                '💡 Tip: Check quotes, indentation, and data types';
-          } else {
-            userFriendlyError = '❌ YAML Update Error: $errorString';
-          }
+          userFriendlyError = '🗂️ File Error: Invalid file path for FlutterFlow. This file may not be supported.';
         } else {
-          userFriendlyError =
-              '❌ Update Failed: Invalid YAML format. Check your syntax.';
+          userFriendlyError = _formatValidationMessage(errorString);
         }
       } else if (errorString.contains('401')) {
-        userFriendlyError =
-            '🔑 Authentication Error: Invalid API token. Please check your credentials.';
+        userFriendlyError = '🔑 Authentication Error: Invalid API token. Please check your credentials.';
       } else if (errorString.contains('403')) {
-        userFriendlyError =
-            '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
+        userFriendlyError = '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
       } else if (errorString.contains('404')) {
-        userFriendlyError =
-            '🔍 Project Not Found: Check your project ID or API token.';
-      } else if (errorString.contains('Network error') ||
-          errorString.contains('Connection')) {
-        userFriendlyError =
-            '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
+        userFriendlyError = '🔍 Project Not Found: Check your project ID or API token.';
+      } else if (errorString.contains('Network error') || errorString.contains('Connection')) {
+        userFriendlyError = '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
       } else {
         userFriendlyError = '⚠️ Update Failed: $errorString';
       }
@@ -759,5 +741,43 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     setState(() {
       _isEditing = true;
     });
+  }
+
+  // Format server validation errors like:
+  // "theme/color-scheme: (1:1): Unknown field name 'colors'"
+  // into a friendly, actionable message.
+  String _formatValidationMessage(String raw) {
+    final text = raw.trim();
+    final pattern = RegExp(r'^(.*?):\s*\((\d+):(\d+)\)\s*:\s*(.*)$');
+    final match = pattern.firstMatch(text);
+    if (match != null) {
+      final path = match.group(1)!.trim();
+      final line = match.group(2);
+      final col = match.group(3);
+      final detail = match.group(4)!.trim();
+      return [
+        '❌ YAML Validation Failed',
+        '• Location: $path (line $line, col $col)',
+        '• Details: $detail',
+        '💡 Tip: Open the section "$path" and fix the highlighted key/value, then press Save again.',
+      ].join('\n');
+    }
+
+    // Fallback: try to extract only line/col
+    final lc = RegExp(r'\((\d+):(\d+)\)').firstMatch(text);
+    if (lc != null) {
+      final line = lc.group(1);
+      final col = lc.group(2);
+      final after = text.contains('):') ? text.split('):').last.trim() : '';
+      return [
+        '❌ YAML Validation Failed',
+        '• Location: line $line, col $col',
+        if (after.isNotEmpty) '• Details: $after',
+        '💡 Tip: Check indentation, quotes, and key names at this position.',
+      ].join('\n');
+    }
+
+    // Default: show raw with a clean prefix
+    return '❌ Update Failed: $text';
   }
 }

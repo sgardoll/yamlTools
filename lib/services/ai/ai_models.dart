@@ -32,12 +32,14 @@ class FileModification {
   final String originalContent;
   final String newContent;
   final bool isNewFile;
+  final List<String>? touchedPaths; // Optional: paths the AI claims it modified
 
   FileModification({
     required this.filePath,
     required this.originalContent,
     required this.newContent,
     required this.isNewFile,
+    this.touchedPaths,
   });
 
   factory FileModification.fromJson(Map<String, dynamic> json) {
@@ -46,6 +48,7 @@ class FileModification {
       originalContent: json['originalContent'] ?? '',
       newContent: json['newContent'] ?? '',
       isNewFile: json['isNewFile'] ?? false,
+      touchedPaths: (json['touchedPaths'] as List?)?.map((e) => e.toString()).toList(),
     );
   }
 }

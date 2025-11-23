@@ -474,7 +474,7 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Proposed Changes',
+                'AI Assist',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: Colors.blue[900],
@@ -500,7 +500,10 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                       });
                     },
                   ),
-                  Text('Apply ${_selectedModificationIndexes.length}/${mods.length} files'),
+                  Text(
+                    'Apply ${_selectedModificationIndexes.length}/${mods.length} files',
+                    style: TextStyle(color: Colors.blue[900]),
+                  ),
                 ],
               ),
             ],
@@ -604,7 +607,10 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
               Expanded(
                 child: ElevatedButton(
                   onPressed: _selectedModificationIndexes.isEmpty ? null : _handleMerge,
-                  child: Text('Apply Selected as Local Edits'),
+                  child: Text(
+                    'Apply Selected as Local Edits',
+                    textAlign: TextAlign.center,
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,
