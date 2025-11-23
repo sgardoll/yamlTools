@@ -1,0 +1,148 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:yaml_generator_app/services/ai/ai_models.dart';
+import 'package:yaml_generator_app/services/ai/ai_service.dart';
+import 'package:yaml_generator_app/services/ai/openai_client.dart';
+import 'package:yaml_generator_app/services/flutterflow_api_service.dart';
+
+class _FakeOpenAIClient extends OpenAIClient {
+  _FakeOpenAIClient(this.fakeResponse) : super(apiKey: 'test-key');
+
+  final Map<String, dynamic> fakeResponse;
+  List<Map<String, String>>? lastMessages;
+  String? lastModel;
+  Map<String, dynamic>? lastResponseFormat;
+
+  @override
+  Future<Map<String, dynamic>> chat({
+    required String model,
+    required List<Map<String, String>> messages,
+    double? temperature,
+    int? maxTokens,
+    List<Map<String, dynamic>>? tools,
+    Map<String, dynamic>? responseFormat,
+  }) async {
+    lastModel = model;
+    lastMessages = messages;
+    lastResponseFormat = responseFormat;
+    return fakeResponse;
+  }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('FlutterFlowApiService', () {
+    test('converts file names to API keys', () {
+      final result = FlutterFlowApiService.convertFileNamesToKeys({
+        'archive_pages/home.yaml': 'home',
+        'theme/colors.yml': 'colors',
+        'complete_raw.yaml': 'raw',
+      });
+
+      expect(result.keys, containsAll(['pages/home', 'theme/colors', 'complete_raw']));
+      expect(result['pages/home'], 'home');
+      expect(result['complete_raw'], 'raw');
+    });
+
+    test('builds rich API exceptions with JSON bodies', () {
+      final response = http.Response(
+        jsonEncode({'error': 'Invalid file key', 'message': 'details'}),
+        422,
+      );
+
+      final exception = FlutterFlowApiService.buildApiException(
+        endpoint: 'https://api.flutterflow.io/v2/updateProjectYaml',
+        response: response,
+        note: 'validation failed',
+      );
+
+      expect(exception.statusCode, 422);
+      expect(exception.message, 'Invalid file key');
+      expect(exception.body, contains('Invalid file key'));
+      expect(exception.note, 'validation failed');
+    });
+  });
+
+  group('AIService', () {
+    test('returns proposed changes with original content for known files', () async {
+      final fakeClient = _FakeOpenAIClient({
+        'choices': [
+          {
+            'message': {
+              'content': jsonEncode({
+                'summary': 'Update home page',
+                'modifications': [
+                  {
+                    'filePath': 'pages/home.yaml',
+                    'newContent': 'updated content',
+                    'touchedPaths': ['widgets'],
+                  }
+                ],
+              }),
+            },
+          },
+        ],
+      });
+
+      final service = AIService('test-key', client: fakeClient);
+      final result = await service.requestModification(
+        request: AIRequest(
+          userPrompt: 'Update the home page widget',
+          pinnedFilePaths: ['pages/home.yaml'],
+          projectFiles: {
+            'pages/home.yaml': 'original content',
+            'theme/colors.yaml': 'color yaml',
+          },
+        ),
+      );
+
+      expect(fakeClient.lastModel, 'gpt-4o');
+      expect(fakeClient.lastResponseFormat, {'type': 'json_object'});
+      expect(fakeClient.lastMessages?.last['content'], contains('pages/home.yaml'));
+
+      final mod = result.modifications.single;
+      expect(mod.originalContent, 'original content');
+      expect(mod.isNewFile, isFalse);
+      expect(mod.touchedPaths, contains('widgets'));
+    });
+
+    test('marks files missing from the project as new', () async {
+      final fakeClient = _FakeOpenAIClient({
+        'choices': [
+          {
+            'message': {
+              'content': jsonEncode({
+                'summary': 'Add a new config file',
+                'modifications': [
+                  {
+                    'filePath': 'config/app.yaml',
+                    'newContent': 'name: demo',
+                  }
+                ],
+              }),
+            },
+          },
+        ],
+      });
+
+      final service = AIService('test-key', client: fakeClient);
+      final result = await service.requestModification(
+        request: AIRequest(
+          userPrompt: 'Add config file',
+          pinnedFilePaths: [],
+          projectFiles: const {
+            'pages/home.yaml': 'original content',
+          },
+        ),
+      );
+
+      final mod = result.modifications.single;
+      expect(mod.filePath, 'config/app.yaml');
+      expect(mod.isNewFile, isTrue);
+      expect(mod.originalContent, isEmpty);
+    });
+  });
+}

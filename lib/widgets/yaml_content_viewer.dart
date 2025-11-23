@@ -148,8 +148,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       });
 
       // For web, we're using a CORS proxy initialized in index.html
-      final apiUrl =
-          'https://api.flutterflow.io/v2-staging/validateProjectYaml';
+      final apiUrl = '${FlutterFlowApiService.baseUrl}/validateProjectYaml';
       debugPrint('Sending validation request to: $apiUrl');
 
       final response = await http.post(
@@ -176,7 +175,9 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             _validationError = null;
           });
         } else {
-          final errorMsg = (data['error'] ?? data['message'] ?? 'Invalid YAML format').toString();
+          final errorMsg =
+              (data['error'] ?? data['message'] ?? 'Invalid YAML format')
+                  .toString();
           setState(() {
             _isValid = false;
             _validationError = _formatValidationMessage(errorMsg);
@@ -295,36 +296,48 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       if (e is FlutterFlowApiException) {
         final status = e.statusCode;
         if (e.isNetworkError) {
-          userFriendlyError = '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
+          userFriendlyError =
+              '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
         } else if (status != null && status >= 400 && status < 500) {
           final bodyText = (e.body ?? e.message);
           userFriendlyError = _formatValidationMessage(bodyText);
         } else if (status == 401) {
-          userFriendlyError = '🔑 Authentication Error: Invalid API token. Please check your credentials.';
+          userFriendlyError =
+              '🔑 Authentication Error: Invalid API token. Please check your credentials.';
         } else if (status == 403) {
-          userFriendlyError = '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
+          userFriendlyError =
+              '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
         } else if (status == 404) {
-          userFriendlyError = '🔍 Project Not Found: Check your project ID or API token.';
+          userFriendlyError =
+              '🔍 Project Not Found: Check your project ID or API token.';
         } else {
-          userFriendlyError = '⚠️ Update Failed (${e.statusCode ?? 'unknown'}): ${e.message}';
+          userFriendlyError =
+              '⚠️ Update Failed (${e.statusCode ?? 'unknown'}): ${e.message}';
         }
       } else if (errorString.contains('400')) {
         // Parse specific 400 errors
         if (errorString.contains('Expected int or stringified int')) {
-          userFriendlyError = '🔢 YAML Error: Expected a number or quoted number. Check your YAML syntax for numeric values.';
+          userFriendlyError =
+              '🔢 YAML Error: Expected a number or quoted number. Check your YAML syntax for numeric values.';
         } else if (errorString.contains('Invalid file key')) {
-          userFriendlyError = '🗂️ File Error: Invalid file path for FlutterFlow. This file may not be supported.';
+          userFriendlyError =
+              '🗂️ File Error: Invalid file path for FlutterFlow. This file may not be supported.';
         } else {
           userFriendlyError = _formatValidationMessage(errorString);
         }
       } else if (errorString.contains('401')) {
-        userFriendlyError = '🔑 Authentication Error: Invalid API token. Please check your credentials.';
+        userFriendlyError =
+            '🔑 Authentication Error: Invalid API token. Please check your credentials.';
       } else if (errorString.contains('403')) {
-        userFriendlyError = '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
+        userFriendlyError =
+            '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
       } else if (errorString.contains('404')) {
-        userFriendlyError = '🔍 Project Not Found: Check your project ID or API token.';
-      } else if (errorString.contains('Network error') || errorString.contains('Connection')) {
-        userFriendlyError = '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
+        userFriendlyError =
+            '🔍 Project Not Found: Check your project ID or API token.';
+      } else if (errorString.contains('Network error') ||
+          errorString.contains('Connection')) {
+        userFriendlyError =
+            '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
       } else {
         userFriendlyError = '⚠️ Update Failed: $errorString';
       }
@@ -372,7 +385,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     });
   }
 
-    // Discard changes and exit edit mode
+  // Discard changes and exit edit mode
   void _discardChanges() {
     // If we only have pending local edits (no manual typing), let parent
     // revert the local edits to the original version.
@@ -559,7 +572,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
 
                 // Save/Discard buttons when editing with unsaved changes OR when
                 // the parent indicates there are pending local edits to confirm
-                if (_isEditing && (_hasUnsavedChanges || widget.hasPendingLocalEdits)) ...[
+                if (_isEditing &&
+                    (_hasUnsavedChanges || widget.hasPendingLocalEdits)) ...[
                   _buildActionButton(
                     icon: Icons.close,
                     label: 'Discard',

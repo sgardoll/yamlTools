@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class FlutterFlowApiService {
-  static const String _baseUrl = 'https://api.flutterflow.io/v2-staging';
+  static const String baseUrl = 'https://api.flutterflow.io/v2';
 
   /// A structured exception to preserve rich error details from the API
   /// so the UI can present actionable feedback (path, line/col, message).
@@ -78,7 +78,7 @@ class FlutterFlowApiService {
 
     try {
       // Primary endpoint per updated FlutterFlow API docs
-      final primaryUri = Uri.parse('$_baseUrl/updateProjectByYaml');
+      final primaryUri = Uri.parse('$baseUrl/updateProjectByYaml');
       debugPrint('Attempting YAML update via: $primaryUri (method: POST)');
 
       final primaryResponse = await http.post(
@@ -110,7 +110,7 @@ class FlutterFlowApiService {
       }
 
       // Fallback PUT endpoint for older API paths
-      final fallbackPutUri = Uri.parse('$_baseUrl/projectYaml');
+      final fallbackPutUri = Uri.parse('$baseUrl/projectYaml');
       debugPrint('Primary endpoint failed. Trying fallback endpoint: $fallbackPutUri (method: PUT)');
 
       final fallbackPutResponse = await http.put(
@@ -140,7 +140,7 @@ class FlutterFlowApiService {
       }
 
       // Legacy POST endpoint for even older API paths
-      final legacyUri = Uri.parse('$_baseUrl/updateProjectYaml');
+      final legacyUri = Uri.parse('$baseUrl/updateProjectYaml');
       debugPrint('Fallback PUT failed. Trying legacy endpoint: $legacyUri');
 
       final legacyResponse = await http.post(
@@ -176,7 +176,7 @@ class FlutterFlowApiService {
 
       debugPrint('Error updating project YAML (likely network): $e');
       throw FlutterFlowApiException(
-        endpoint: '$_baseUrl',
+        endpoint: baseUrl,
         statusCode: null,
         body: null,
         message: 'Network error while updating project YAML: $e',

@@ -6,9 +6,9 @@ Flutter app for exploring, editing, validating, and re-uploading FlutterFlow pro
 
 - Fetches project YAML via the FlutterFlow API (project ID + API token) and persists recent projects locally.
 - Multiple viewers: flat list, tree view, and an edited-only list with git-style diffs.
-- Inline validation and update: validate a single YAML file and push it back to FlutterFlow (uses the `v2-staging` API base).
+- Inline validation and update: validate a single YAML file and push it back to FlutterFlow (uses the production `v2` API base).
 - Optional AI assist: enter an OpenAI API key to generate proposed changes, review them, and apply selectively.
-- Local-only secrets: API tokens/keys are stored on-device via `shared_preferences`; nothing is uploaded besides API requests you trigger.
+- Local-only secrets: API tokens/keys are stored on-device via secure storage; nothing is uploaded besides API requests you trigger.
 
 ## Requirements
 

@@ -39,6 +39,7 @@ dependencies:
   http: ^1.1.0
   flutter_markdown: ^0.6.17 # For displaying markdown content
   shared_preferences: ^2.2.0 # For saving state and recent projects
+  flutter_secure_storage: ^9.2.2 # For storing credentials securely
   archive: ^3.3.7 # For handling ZIP files
   file_picker: ^10.3.7 # For file selection
   path_provider: ^2.0.15 # For accessing device directories

@@ -37,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   static const String _heroImagePath = 'assets/images/intro_logo.png';
   static const String _flutterFlowDocsUrl =
       'https://docs.flutterflow.io/api-and-integrations/flutterflow-api';
+  static const String _apiBaseUrl = FlutterFlowApiService.baseUrl;
   // 1. Declare ALL state fields and controllers here:
   String? _rawFetchedYaml;
   Map<String, dynamic>? _parsedYamlMap;
@@ -288,7 +289,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Perform a non-destructive merge: keep original keys/sections unless explicitly changed.
-  String _nonDestructiveYamlMergeString(String originalYaml, String modifiedYaml) {
+  String _nonDestructiveYamlMergeString(
+      String originalYaml, String modifiedYaml) {
     try {
       final originalDoc = loadYaml(originalYaml);
       final modifiedDoc = loadYaml(modifiedYaml);
@@ -426,6 +428,25 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _clearStoredCredentials() async {
+    await PreferencesManager.clearCredentials();
+    if (!mounted) return;
+
+    setState(() {
+      _apiTokenController.clear();
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Stored credentials cleared'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+  }
+
   // Handle selecting a project from recent projects list
   void _handleProjectSelected(String projectId) async {
     // Load the saved API token
@@ -441,7 +462,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Apply changes to a file and update modification tracking
-  Future<void> _applyFileChanges(String fileName, String newContent, {bool validated = false, String? messageOverride}) async {
+  Future<void> _applyFileChanges(String fileName, String newContent,
+      {bool validated = false, String? messageOverride}) async {
     final contentChanged = _exportedFiles[fileName] != newContent;
 
     setState(() {
@@ -474,7 +496,8 @@ class _HomeScreenState extends State<HomeScreen> {
       // Track validation timestamp when explicitly validated
       if (validated) {
         _fileValidationTimestamps[fileName] = DateTime.now();
-        if (!contentChanged && (messageOverride == null || messageOverride.isEmpty)) {
+        if (!contentChanged &&
+            (messageOverride == null || messageOverride.isEmpty)) {
           _operationMessage = 'File "$fileName" validated.';
           _generatedYamlMessage = '$_operationMessage\n\nValidation passed.';
         }
@@ -647,8 +670,7 @@ class _HomeScreenState extends State<HomeScreen> {
     List<int>? decodedZipBytes;
 
     try {
-      final apiUrl =
-          'https://api.flutterflow.io/v2-staging/projectYamls?projectId=$projectId';
+      final apiUrl = '$_apiBaseUrl/projectYamls?projectId=$projectId';
       print('Fetching YAML from: $apiUrl');
 
       final response = await http.get(
@@ -1055,14 +1077,14 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-          // Custom app header
-          AppHeader(
-            onNewProject: _handleNewProject,
-            onRecent: _handleRecentProjects,
-            onReload: hasCredentials ? _fetchProjectYaml : null,
-            onAIAssist: _handleAIAssist,
-            showOnlyNewProject: !hasYaml,
-          ),
+                  // Custom app header
+                  AppHeader(
+                    onNewProject: _handleNewProject,
+                    onRecent: _handleRecentProjects,
+                    onReload: hasCredentials ? _fetchProjectYaml : null,
+                    onAIAssist: _handleAIAssist,
+                    showOnlyNewProject: !hasYaml,
+                  ),
 
                   // Project header if we have YAML loaded
                   if (hasYaml)
@@ -1115,15 +1137,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                     projectId: _projectIdController.text,
                                     // Show Save/Cancel immediately when a file
                                     // has pending local edits (Unsaved)
-                                    hasPendingLocalEdits: _selectedFilePath != null
-                                        ? _hasPendingLocalEdits(_selectedFilePath!)
-                                        : false,
+                                    hasPendingLocalEdits:
+                                        _selectedFilePath != null
+                                            ? _hasPendingLocalEdits(
+                                                _selectedFilePath!)
+                                            : false,
                                     startInEditMode: _selectedFilePath != null
-                                        ? _hasPendingLocalEdits(_selectedFilePath!)
+                                        ? _hasPendingLocalEdits(
+                                            _selectedFilePath!)
                                         : false,
-                                    onDiscardPendingEdits: _selectedFilePath != null
-                                        ? () => _revertLocalEdits(_selectedFilePath!)
-                                        : null,
+                                    onDiscardPendingEdits:
+                                        _selectedFilePath != null
+                                            ? () => _revertLocalEdits(
+                                                _selectedFilePath!)
+                                            : null,
                                     onContentChanged: _selectedFilePath != null
                                         ? (content) async {
                                             // Content has been validated successfully in YamlContentViewer
@@ -1260,6 +1287,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           obscureText: true,
                         ),
                       ],
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _isLoading ? null : _clearStoredCredentials,
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Clear API & AI tokens'),
+                      ),
                     ),
                     const SizedBox(height: 28),
 

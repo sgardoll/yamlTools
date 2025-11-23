@@ -6,11 +6,10 @@ import 'openai_client.dart';
 // Updated System Prompt for strict FlutterFlow compliance
 class AIService {
   final String apiKey;
-  late final OpenAIClient _client;
+  final OpenAIClient _client;
 
-  AIService(this.apiKey) {
-    _client = OpenAIClient(apiKey: apiKey);
-  }
+  AIService(this.apiKey, {OpenAIClient? client})
+      : _client = client ?? OpenAIClient(apiKey: apiKey);
 
   Future<ProposedChange> requestModification({
     required AIRequest request,
@@ -41,7 +40,7 @@ class AIService {
       );
 
       final content = response['choices'][0]['message']['content'] as String;
-      
+
       // 4. Parse Response
       return _parseResponse(content, request.projectFiles);
     } catch (e) {
@@ -52,7 +51,7 @@ class AIService {
 
   String _prepareContext(AIRequest request) {
     final buffer = StringBuffer();
-    
+
     // Always add pinned files
     for (final path in request.pinnedFilePaths) {
       if (request.projectFiles.containsKey(path)) {
@@ -74,31 +73,38 @@ class AIService {
     // Identify potentially relevant files based on keywords if not pinned
     // This is a simplified heuristic. In a real app, this would be more robust.
     final promptLower = request.userPrompt.toLowerCase();
-    
+
     request.projectFiles.forEach((path, content) {
       if (request.pinnedFilePaths.contains(path)) return; // Already added
 
       bool isRelevant = false;
-      
+
       // Check for direct filename mention
-      if (promptLower.contains(path.toLowerCase().split('/').last.split('.').first)) {
+      if (promptLower
+          .contains(path.toLowerCase().split('/').last.split('.').first)) {
         isRelevant = true;
       }
-      
+
       // Simple keyword matching
-      if (promptLower.contains('theme') && path.contains('theme')) isRelevant = true;
-      if (promptLower.contains('color') && path.contains('colors')) isRelevant = true;
-      if ((promptLower.contains('db') || promptLower.contains('database') || promptLower.contains('collection')) && 
-          (path.contains('firestore') || path.contains('schema'))) isRelevant = true;
-      if (promptLower.contains('page') && path.contains('pages/')) isRelevant = true;
+      if (promptLower.contains('theme') && path.contains('theme'))
+        isRelevant = true;
+      if (promptLower.contains('color') && path.contains('colors'))
+        isRelevant = true;
+      if ((promptLower.contains('db') ||
+              promptLower.contains('database') ||
+              promptLower.contains('collection')) &&
+          (path.contains('firestore') || path.contains('schema')))
+        isRelevant = true;
+      if (promptLower.contains('page') && path.contains('pages/'))
+        isRelevant = true;
 
       // Add if relevant and small enough (simple token management)
       if (isRelevant && content.length < 10000) {
-         buffer.writeln("File: $path");
-         buffer.writeln("```yaml");
-         buffer.writeln(content);
-         buffer.writeln("```");
-         buffer.writeln("");
+        buffer.writeln("File: $path");
+        buffer.writeln("```yaml");
+        buffer.writeln(content);
+        buffer.writeln("```");
+        buffer.writeln("");
       }
     });
 
@@ -144,10 +150,11 @@ $contextData
 ''';
   }
 
-  ProposedChange _parseResponse(String jsonContent, Map<String, String> originalFiles) {
+  ProposedChange _parseResponse(
+      String jsonContent, Map<String, String> originalFiles) {
     try {
       final Map<String, dynamic> json = jsonDecode(jsonContent);
-      
+
       // Enrich with original content
       if (json['modifications'] != null) {
         for (var mod in json['modifications']) {
@@ -156,15 +163,24 @@ $contextData
           if (originalFiles.containsKey(path)) {
             mod['originalContent'] = originalFiles[path];
           } else {
-             mod['originalContent'] = ''; // New file or not found
-             mod['isNewFile'] = true;
+            mod['originalContent'] = ''; // New file or not found
+            mod['isNewFile'] = true;
           }
         }
       }
-      
+
       return ProposedChange.fromJson(json);
     } catch (e) {
-      throw Exception("Failed to parse AI response: $e\nResponse: $jsonContent");
+      throw Exception(
+          "Failed to parse AI response: $e\nResponse: $jsonContent");
     }
+  }
+
+  @visibleForTesting
+  ProposedChange parseResponseForTest(
+    String jsonContent,
+    Map<String, String> originalFiles,
+  ) {
+    return _parseResponse(jsonContent, originalFiles);
   }
 }
