@@ -4,7 +4,7 @@ import 'dart:convert'; // For utf8 decoding & JSON
 import 'package:yaml/yaml.dart';
 import 'package:archive/archive.dart'; // For ZIP file handling
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart';
 import '../storage/preferences_manager.dart';
 import '../widgets/recent_projects_widget.dart';
 import '../widgets/yaml_tree_view.dart'; // Import our new tree view widget
@@ -288,6 +288,104 @@ class _HomeScreenState extends State<HomeScreen> {
   String _mapToYamlString(Map<String, dynamic> map) {
     if (map.isEmpty) return '{}';
     return _nodeToYamlString(map, 0, false).trim();
+  }
+
+  // Perform a non-destructive merge: keep original keys/sections unless explicitly changed.
+  String _nonDestructiveYamlMergeString(String originalYaml, String modifiedYaml) {
+    try {
+      final originalDoc = loadYaml(originalYaml);
+      final modifiedDoc = loadYaml(modifiedYaml);
+
+      final original = _convertYamlNode(originalDoc);
+      final modified = _convertYamlNode(modifiedDoc);
+
+      final merged = _nonDestructiveMergeNodes(original, modified);
+
+      if (merged is Map<String, dynamic>) {
+        return _mapToYamlString(merged);
+      } else if (merged is List) {
+        // Rare top-level list case
+        final mapWrapper = {'root': merged};
+        final yaml = _mapToYamlString(mapWrapper);
+        // Strip the 'root:' wrapper
+        return yaml.replaceFirst(RegExp(r'^root:\s*\n?'), '');
+      } else if (merged is String) {
+        return merged;
+      } else {
+        return modifiedYaml; // Fallback
+      }
+    } catch (e) {
+      debugPrint('Non-destructive merge failed: $e');
+      return modifiedYaml;
+    }
+  }
+
+  dynamic _nonDestructiveMergeNodes(dynamic original, dynamic modified) {
+    if (modified == null) return original;
+
+    // Map vs Map: deep merge, preserving missing keys from original
+    if (original is Map && modified is Map) {
+      final result = <String, dynamic>{};
+      // Add all modified keys first
+      for (final entry in modified.entries) {
+        final key = entry.key.toString();
+        final modVal = entry.value;
+        final origVal = original.containsKey(key) ? original[key] : null;
+        result[key] = _nonDestructiveMergeNodes(origVal, modVal);
+      }
+      // Bring back any keys missing from modified
+      for (final entry in original.entries) {
+        final key = entry.key.toString();
+        if (!result.containsKey(key)) {
+          result[key] = entry.value;
+        }
+      }
+      return result;
+    }
+
+    // List vs List: try to merge by stable id ('key' or 'id') else prefer modified
+    if (original is List && modified is List) {
+      Map<String, dynamic>? _indexById(List list) {
+        final out = <String, dynamic>{};
+        for (final item in list) {
+          if (item is Map) {
+            final id = (item['key'] ?? item['id']);
+            if (id is String && id.isNotEmpty) {
+              out[id] = item;
+            } else {
+              return null; // Not consistently identifiable
+            }
+          } else {
+            return null;
+          }
+        }
+        return out;
+      }
+
+      final oIndex = _indexById(original);
+      final mIndex = _indexById(modified);
+      if (oIndex != null && mIndex != null) {
+        final resultList = <dynamic>[];
+        // Preserve order given by modified, merging with original elements when same id
+        for (final id in mIndex.keys) {
+          final modItem = mIndex[id];
+          final origItem = oIndex[id];
+          resultList.add(_nonDestructiveMergeNodes(origItem, modItem));
+        }
+        // Append any original items not present in modified to avoid accidental deletions
+        for (final id in oIndex.keys) {
+          if (!mIndex.containsKey(id)) {
+            resultList.add(oIndex[id]);
+          }
+        }
+        return resultList;
+      }
+      // Fallback: prefer modified list as the intentional source of truth
+      return modified;
+    }
+
+    // Prefer modified scalar when present
+    return modified;
   }
 
   @override
@@ -2047,8 +2145,16 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     for (var mod in change.modifications) {
-      await _updateYamlFromAI(mod.newContent,
-          existingFile: mod.isNewFile ? null : mod.filePath);
+      if (!mod.isNewFile && _exportedFiles.containsKey(mod.filePath)) {
+        final base = mod.originalContent.isNotEmpty
+            ? mod.originalContent
+            : _exportedFiles[mod.filePath] ?? '';
+        final merged = _nonDestructiveYamlMergeString(base, mod.newContent);
+        await _updateYamlFromAI(merged, existingFile: mod.filePath);
+      } else {
+        await _updateYamlFromAI(mod.newContent,
+            existingFile: mod.isNewFile ? null : mod.filePath);
+      }
     }
 
     // Refresh view
