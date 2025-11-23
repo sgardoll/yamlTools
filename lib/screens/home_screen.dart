@@ -96,6 +96,44 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(fn);
   }
 
+  // Determine if a file has local edits that haven't been synced to FlutterFlow
+  bool _hasPendingLocalEdits(String filePath) {
+    final updateTs = _fileUpdateTimestamps[filePath];
+    if (updateTs == null) return false;
+    final syncTs = _fileSyncTimestamps[filePath];
+    // Pending when no sync yet, or the last sync is older than last update
+    return syncTs == null || syncTs.isBefore(updateTs);
+  }
+
+  // Revert local edits for a file back to its original content
+  void _revertLocalEdits(String filePath) {
+    setState(() {
+      if (_originalFiles.containsKey(filePath)) {
+        // Restore original content
+        _exportedFiles[filePath] = _originalFiles[filePath]!;
+      } else {
+        // If this was a newly created file, remove it entirely
+        _exportedFiles.remove(filePath);
+        _changedFiles.remove(filePath);
+      }
+
+      // Clear timestamps associated with local edits
+      _fileUpdateTimestamps.remove(filePath);
+      _fileValidationTimestamps.remove(filePath);
+      // Do not clear sync timestamps for files that had previous successful syncs
+
+      // Update operation message
+      _operationMessage = 'Discarded local edits for "$filePath".';
+      _generatedYamlMessage =
+          'Local edits for "$filePath" were discarded. The file has been restored to its previous state.';
+
+      // If file was removed, clear the selection gracefully
+      if (!_exportedFiles.containsKey(filePath)) {
+        _selectedFilePath = null;
+      }
+    });
+  }
+
   void _handleYamlFetchError(String message, {bool clearRawContent = false}) {
     final messageWithDocs =
         '$message\n\nNeed help? Review the FlutterFlow API docs: $_flutterFlowDocsUrl';
@@ -308,12 +346,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Apply changes to a file and update modification tracking
-  Future<void> _applyFileChanges(String fileName, String newContent, {bool validated = false}) async {
-    // Only update if content has actually changed
-    if (_exportedFiles[fileName] != newContent) {
-      setState(() {
-        // If this is first modification, backup the original
-        if (!_originalFiles.containsKey(fileName)) {
+  Future<void> _applyFileChanges(String fileName, String newContent, {bool validated = false, String? messageOverride}) async {
+    final contentChanged = _exportedFiles[fileName] != newContent;
+
+    setState(() {
+      if (contentChanged) {
+        // If this is first modification and the file existed before, backup the original
+        if (!_originalFiles.containsKey(fileName) &&
+            _exportedFiles.containsKey(fileName)) {
           _originalFiles[fileName] = _exportedFiles[fileName]!;
         }
 
@@ -322,23 +362,31 @@ class _HomeScreenState extends State<HomeScreen> {
         _changedFiles[fileName] = newContent;
         _hasModifications = true;
 
-        // Track validation timestamp only when explicitly validated
-        if (validated) {
-          _fileValidationTimestamps[fileName] = DateTime.now();
-        }
-
         // Always track local update timestamp when file content changes
         _fileUpdateTimestamps[fileName] = DateTime.now();
 
         // Update the message to indicate a manual edit was made
-        _operationMessage = 'File "$fileName" manually edited.';
-        _generatedYamlMessage =
-            '$_operationMessage\n\nThe file has been updated.';
-      });
+        if (messageOverride != null && messageOverride.isNotEmpty) {
+          _operationMessage = messageOverride;
+          _generatedYamlMessage = messageOverride;
+        } else {
+          _operationMessage = 'File "$fileName" manually edited.';
+          _generatedYamlMessage =
+              '$_operationMessage\n\nThe file has been updated.';
+        }
+      }
 
-      // Note: API update is now handled automatically by YamlContentViewer
-      // after successful validation
-    }
+      // Track validation timestamp when explicitly validated
+      if (validated) {
+        _fileValidationTimestamps[fileName] = DateTime.now();
+        if (!contentChanged && (messageOverride == null || messageOverride.isEmpty)) {
+          _operationMessage = 'File "$fileName" validated.';
+          _generatedYamlMessage = '$_operationMessage\n\nValidation passed.';
+        }
+      }
+    });
+
+    // Note: API update is handled by YamlContentViewer after successful validation
   }
 
   // Helper to auto-expand important files
@@ -889,6 +937,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                     isReadOnly: false,
                                     filePath: _selectedFilePath ?? '',
                                     projectId: _projectIdController.text,
+                                    // Show Save/Cancel immediately when a file
+                                    // has pending local edits (Unsaved)
+                                    hasPendingLocalEdits: _selectedFilePath != null
+                                        ? _hasPendingLocalEdits(_selectedFilePath!)
+                                        : false,
+                                    startInEditMode: _selectedFilePath != null
+                                        ? _hasPendingLocalEdits(_selectedFilePath!)
+                                        : false,
+                                    onDiscardPendingEdits: _selectedFilePath != null
+                                        ? () => _revertLocalEdits(_selectedFilePath!)
+                                        : null,
                                     onContentChanged: _selectedFilePath != null
                                         ? (content) async {
                                             // Content has been validated successfully in YamlContentViewer
@@ -2025,68 +2084,48 @@ class _HomeScreenState extends State<HomeScreen> {
     if (yamlContent.isEmpty) return;
 
     if (existingFile != null && _exportedFiles.containsKey(existingFile)) {
-      // Update existing file - put it in editing mode like a manual edit
+      // Stage the change first so timestamps are set and the tree shows Unsaved immediately
+      await _applyFileChanges(
+        existingFile,
+        yamlContent,
+        validated: false,
+        messageOverride:
+            'AI-generated changes applied to "$existingFile". Review the changes and click Save to upload to FlutterFlow.',
+      );
+
+      // Now update selection and controllers for editing UI
       setState(() {
-        // Back up the original if this is the first modification
-        if (!_originalFiles.containsKey(existingFile)) {
-          _originalFiles[existingFile] = _exportedFiles[existingFile]!;
-        }
-
-        // Update the file content but don't auto-save - let user review and save manually
-        _exportedFiles[existingFile] = yamlContent;
-        _changedFiles[existingFile] = yamlContent;
-        _hasModifications = true;
-
-        _operationMessage =
-            'AI-generated changes applied to "$existingFile". Review the changes and click Save to upload to FlutterFlow.';
-        _generatedYamlMessage = _operationMessage;
-
-        // Make sure the file is expanded and selected for viewing
         _expandedFiles.add(existingFile);
         _selectedFilePath = existingFile;
-
-        // Update the controller and put in editing mode so Save/Discard buttons appear
         if (!_fileControllers.containsKey(existingFile)) {
           _fileControllers[existingFile] =
               TextEditingController(text: yamlContent);
         } else {
           _fileControllers[existingFile]!.text = yamlContent;
         }
-
-        // Switch to tree view to show the updated file
         _selectedViewIndex = 1;
       });
-
-      // Mark the file as changed through the normal workflow to ensure proper tracking
-      await _applyFileChanges(existingFile, yamlContent, validated: false);
     } else {
       // Create a new file with AI-generated content
       final String fileName =
           'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
 
+      // Stage the new file first so Unsaved indicator appears immediately
+      await _applyFileChanges(
+        fileName,
+        yamlContent,
+        validated: false,
+        messageOverride:
+            'AI-generated YAML file "$fileName" created. Review and click Save to upload to FlutterFlow.',
+      );
+
+      // Then set selection and editor state
       setState(() {
-        // Add to all the file maps so it appears in the tree
-        _exportedFiles[fileName] = yamlContent;
-        _changedFiles[fileName] = yamlContent;
-        _hasModifications = true;
-
-        _operationMessage =
-            'AI-generated YAML file "$fileName" created. Review and click Save to upload to FlutterFlow.';
-        _generatedYamlMessage = _operationMessage;
-
-        // Auto-expand and select the new file so it's visible
         _expandedFiles.add(fileName);
         _selectedFilePath = fileName;
-
-        // Create a controller for the new file
         _fileControllers[fileName] = TextEditingController(text: yamlContent);
-
-        // Switch to tree view to show the new file
         _selectedViewIndex = 1;
       });
-
-      // Mark the new file as changed through the normal workflow (not yet validated)
-      await _applyFileChanges(fileName, yamlContent, validated: false);
     }
   }
 
