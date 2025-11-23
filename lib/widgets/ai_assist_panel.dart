@@ -153,7 +153,8 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
     String query = '';
     // Initialize with filtered list (exclude special aggregate files)
     List<String> files = allFiles
-        .where((file) => file != 'complete_raw.yaml' && file != 'raw_project.yaml')
+        .where(
+            (file) => file != 'complete_raw.yaml' && file != 'raw_project.yaml')
         .toList();
 
     showDialog(
@@ -178,7 +179,8 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                           query = value.trim().toLowerCase();
                           files = allFiles.where((file) {
                             // Hide only special aggregate files
-                            if (file == 'complete_raw.yaml' || file == 'raw_project.yaml') {
+                            if (file == 'complete_raw.yaml' ||
+                                file == 'raw_project.yaml') {
                               return false;
                             }
                             final display = file.startsWith('archive_')
@@ -204,10 +206,11 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                           final displayName = file.startsWith('archive_')
                               ? file.substring('archive_'.length)
                               : file;
-                          
+
                           final isSelected = _pinnedFiles.contains(file);
                           return CheckboxListTile(
-                            title: Text(displayName, style: TextStyle(fontSize: 13)),
+                            title: Text(displayName,
+                                style: TextStyle(fontSize: 13)),
                             value: isSelected,
                             onChanged: (val) {
                               setState(() {
@@ -283,7 +286,7 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
               Icon(Icons.auto_awesome, color: AppTheme.primaryColor),
               SizedBox(width: 8),
               Text(
-                'AI Developer',
+                "AI Assist",
                 style: AppTheme.headingMedium,
               ),
             ],
@@ -315,12 +318,10 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                 child: TextField(
                   controller: _apiKeyController,
                   decoration: InputDecoration(
-                    hintText: 'Enter your OpenAI API key',
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
+                    hintText: "Enter your OpenAI API key to get started",
                   ),
                   obscureText: true,
                 ),
@@ -367,7 +368,8 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
             child: TextField(
               controller: _promptController,
               decoration: InputDecoration(
-                hintText: 'E.g., "Add a verified boolean field to the users collection" or "Change the primary color to red"',
+                hintText:
+                    'E.g., "Add a verified boolean field to the users collection" or "Change the primary color to red"',
                 border: OutlineInputBorder(),
                 alignLabelWithHint: true,
               ),
@@ -377,7 +379,7 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
             ),
           ),
           SizedBox(height: 16),
-          
+
           // Context Pinning
           Row(
             children: [
@@ -386,43 +388,47 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                 icon: Icon(Icons.playlist_add_check, size: 18),
                 label: Text('Context Files (${_pinnedFiles.length})'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _pinnedFiles.isNotEmpty ? Colors.blue[100] : Colors.grey[200],
+                  backgroundColor: _pinnedFiles.isNotEmpty
+                      ? Colors.blue[100]
+                      : Colors.grey[200],
                   foregroundColor: Colors.black87,
                 ),
               ),
               Spacer(),
             ],
           ),
-          
+
           if (_pinnedFiles.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 8.0),
               child: Wrap(
                 spacing: 4,
                 runSpacing: 4,
-                children: _pinnedFiles.map((f) => Chip(
-                  label: Text(f, style: TextStyle(fontSize: 10)),
-                  deleteIcon: Icon(Icons.close, size: 12),
-                  onDeleted: () {
-                    setState(() {
-                      _pinnedFiles.remove(f);
-                    });
-                  },
-                  visualDensity: VisualDensity.compact,
-                )).toList(),
+                children: _pinnedFiles
+                    .map((f) => Chip(
+                          label: Text(f, style: TextStyle(fontSize: 10)),
+                          deleteIcon: Icon(Icons.close, size: 12),
+                          onDeleted: () {
+                            setState(() {
+                              _pinnedFiles.remove(f);
+                            });
+                          },
+                          visualDensity: VisualDensity.compact,
+                        ))
+                    .toList(),
               ),
             ),
-            
+
           SizedBox(height: 16),
-          
+
           if (_errorMessage != null)
-             Padding(
-               padding: const EdgeInsets.only(bottom: 16.0),
-               child: Text(
-                 _errorMessage!,
-                 style: TextStyle(color: Colors.red),
-               ),
-             ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16.0),
+              child: Text(
+                _errorMessage!,
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
 
           SizedBox(
             height: 48,
@@ -461,7 +467,8 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
 
   Widget _buildReviewState() {
     final mods = _currentProposal!.modifications;
-    final currentMod = mods.isNotEmpty ? mods[_selectedModificationIndex] : null;
+    final currentMod =
+        mods.isNotEmpty ? mods[_selectedModificationIndex] : null;
 
     return Column(
       children: [
@@ -489,7 +496,8 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
               Row(
                 children: [
                   Checkbox(
-                    value: _selectedModificationIndexes.length == mods.length && mods.isNotEmpty,
+                    value: _selectedModificationIndexes.length == mods.length &&
+                        mods.isNotEmpty,
                     onChanged: (checked) {
                       setState(() {
                         _selectedModificationIndexes.clear();
@@ -524,14 +532,17 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                 final isSelected = index == _selectedModificationIndex;
                 final isChecked = _selectedModificationIndexes.contains(index);
                 return InkWell(
-                  onTap: () => setState(() => _selectedModificationIndex = index),
+                  onTap: () =>
+                      setState(() => _selectedModificationIndex = index),
                   child: Container(
                     padding: EdgeInsets.symmetric(horizontal: 16),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       border: Border(
                         bottom: BorderSide(
-                          color: isSelected ? AppTheme.primaryColor : Colors.transparent,
+                          color: isSelected
+                              ? AppTheme.primaryColor
+                              : Colors.transparent,
                           width: 2,
                         ),
                       ),
@@ -555,8 +566,12 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
                         Text(
                           mods[index].filePath,
                           style: TextStyle(
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                            color: isSelected ? AppTheme.primaryColor : Colors.black87,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: isSelected
+                                ? AppTheme.primaryColor
+                                : Colors.black87,
                           ),
                         ),
                       ],
@@ -606,7 +621,9 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
               SizedBox(width: 16),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: _selectedModificationIndexes.isEmpty ? null : _handleMerge,
+                  onPressed: _selectedModificationIndexes.isEmpty
+                      ? null
+                      : _handleMerge,
                   child: Text(
                     'Apply Selected as Local Edits',
                     textAlign: TextAlign.center,
