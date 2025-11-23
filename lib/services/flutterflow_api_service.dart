@@ -1,8 +1,48 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class FlutterFlowApiService {
   static const String _baseUrl = 'https://api.flutterflow.io/v2-staging';
+
+  /// A structured exception to preserve rich error details from the API
+  /// so the UI can present actionable feedback (path, line/col, message).
+  static FlutterFlowApiException buildApiException({
+    required String endpoint,
+    required http.Response? response,
+    String? note,
+  }) {
+    int? status;
+    String? body;
+    Map<String, dynamic>? jsonBody;
+    String message = 'Unknown error';
+
+    if (response != null) {
+      status = response.statusCode;
+      body = response.body;
+      // Try to decode JSON to extract errors/messages
+      try {
+        jsonBody = body.isNotEmpty ? json.decode(body) as Map<String, dynamic> : null;
+      } catch (_) {
+        jsonBody = null;
+      }
+
+      // Prefer structured fields
+      if (jsonBody != null) {
+        message = (jsonBody['error'] ?? jsonBody['message'] ?? body ?? '').toString();
+      } else {
+        message = body ?? 'HTTP $status error';
+      }
+    }
+
+    return FlutterFlowApiException(
+      endpoint: endpoint,
+      statusCode: status,
+      body: body,
+      message: message,
+      note: note,
+    );
+  }
 
   /// Updates the YAML files in a FlutterFlow project
   ///
@@ -29,8 +69,8 @@ class FlutterFlowApiService {
       'fileKeyToContent': fileKeyToContent,
     });
 
-    print('Updating project YAML for project: $projectId');
-    print('Files to update: ${fileKeyToContent.keys.join(', ')}');
+    debugPrint('Updating project YAML for project: $projectId');
+    debugPrint('Files to update: ${fileKeyToContent.keys.join(', ')}');
     // Debug: print the actual file key to content mapping
     fileKeyToContent.forEach((key, content) {
       print('File key: "$key" -> Content length: ${content.length} chars');
@@ -39,7 +79,7 @@ class FlutterFlowApiService {
     try {
       // Primary endpoint per updated FlutterFlow API docs
       final primaryUri = Uri.parse('$_baseUrl/updateProjectByYaml');
-      print('Attempting YAML update via: $primaryUri (method: POST)');
+      debugPrint('Attempting YAML update via: $primaryUri (method: POST)');
 
       final primaryResponse = await http.post(
         primaryUri,
@@ -51,19 +91,27 @@ class FlutterFlowApiService {
         body: body,
       );
 
-      print(
-          'Primary update response status: ${primaryResponse.statusCode}');
-      print('Primary update response body: ${primaryResponse.body}');
+      debugPrint('Primary update response status: ${primaryResponse.statusCode}');
+      debugPrint('Primary update response body: ${primaryResponse.body}');
 
       if (primaryResponse.statusCode == 200) {
-        print('Successfully updated project YAML via primary endpoint');
+        debugPrint('Successfully updated project YAML via primary endpoint');
         return true;
+      }
+
+      // If the primary endpoint returns a client error (4xx), it's very likely
+      // a validation error. Do NOT fall back and mask the message. Surface it.
+      if (primaryResponse.statusCode >= 400 && primaryResponse.statusCode < 500) {
+        throw buildApiException(
+          endpoint: primaryUri.toString(),
+          response: primaryResponse,
+          note: 'Primary endpoint returned client error — validation likely failed.',
+        );
       }
 
       // Fallback PUT endpoint for older API paths
       final fallbackPutUri = Uri.parse('$_baseUrl/projectYaml');
-      print(
-          'Primary endpoint failed. Trying fallback endpoint: $fallbackPutUri (method: PUT)');
+      debugPrint('Primary endpoint failed. Trying fallback endpoint: $fallbackPutUri (method: PUT)');
 
       final fallbackPutResponse = await http.put(
         fallbackPutUri,
@@ -75,17 +123,25 @@ class FlutterFlowApiService {
         body: body,
       );
 
-      print('Fallback PUT response status: ${fallbackPutResponse.statusCode}');
-      print('Fallback PUT response body: ${fallbackPutResponse.body}');
+      debugPrint('Fallback PUT response status: ${fallbackPutResponse.statusCode}');
+      debugPrint('Fallback PUT response body: ${fallbackPutResponse.body}');
 
       if (fallbackPutResponse.statusCode == 200) {
-        print('Successfully updated project YAML via fallback PUT endpoint');
+        debugPrint('Successfully updated project YAML via fallback PUT endpoint');
         return true;
+      }
+
+      if (fallbackPutResponse.statusCode >= 400 && fallbackPutResponse.statusCode < 500) {
+        throw buildApiException(
+          endpoint: fallbackPutUri.toString(),
+          response: fallbackPutResponse,
+          note: 'Fallback PUT endpoint returned client error.',
+        );
       }
 
       // Legacy POST endpoint for even older API paths
       final legacyUri = Uri.parse('$_baseUrl/updateProjectYaml');
-      print('Fallback PUT failed. Trying legacy endpoint: $legacyUri');
+      debugPrint('Fallback PUT failed. Trying legacy endpoint: $legacyUri');
 
       final legacyResponse = await http.post(
         legacyUri,
@@ -97,23 +153,35 @@ class FlutterFlowApiService {
         body: body,
       );
 
-      print('Legacy update response status: ${legacyResponse.statusCode}');
-      print('Legacy update response body: ${legacyResponse.body}');
+      debugPrint('Legacy update response status: ${legacyResponse.statusCode}');
+      debugPrint('Legacy update response body: ${legacyResponse.body}');
 
       if (legacyResponse.statusCode == 200) {
-        print('Successfully updated project YAML via legacy endpoint');
+        debugPrint('Successfully updated project YAML via legacy endpoint');
         return true;
       }
 
-      throw Exception(
-        'Failed to update project YAML. Primary status: '
-        '${primaryResponse.statusCode}, Fallback PUT status: '
-        '${fallbackPutResponse.statusCode}, Legacy status: '
-        '${legacyResponse.statusCode}. Last body: ${legacyResponse.body}',
+      throw buildApiException(
+        endpoint: legacyUri.toString(),
+        response: legacyResponse,
+        note:
+            'All endpoints failed. See body for the most recent error. Primary and fallback statuses were ${primaryResponse.statusCode} and ${fallbackPutResponse.statusCode}.',
       );
     } catch (e) {
-      print('Error updating project YAML: $e');
-      throw Exception('Network error while updating project YAML: $e');
+      // If we already built a structured API exception, just bubble it up.
+      if (e is FlutterFlowApiException) {
+        debugPrint('API update failed with structured error: $e');
+        rethrow;
+      }
+
+      debugPrint('Error updating project YAML (likely network): $e');
+      throw FlutterFlowApiException(
+        endpoint: '$_baseUrl',
+        statusCode: null,
+        body: null,
+        message: 'Network error while updating project YAML: $e',
+        isNetworkError: true,
+      );
     }
   }
 
@@ -181,7 +249,7 @@ class FlutterFlowApiService {
 
     fileNameToContent.forEach((fileName, content) {
       final fileKey = getFileKey(fileName);
-      print('DEBUG: Converting "$fileName" -> "$fileKey"'); // Debug log
+      debugPrint('DEBUG: Converting "$fileName" -> "$fileKey"'); // Debug log
       fileKeyToContent[fileKey] = content;
     });
 
@@ -202,7 +270,31 @@ class FlutterFlowApiService {
     print('Testing file key conversions:');
     for (final testCase in testCases) {
       final result = getFileKey(testCase);
-      print('  "$testCase" -> "$result"');
+      debugPrint('  "$testCase" -> "$result"');
     }
+  }
+}
+
+class FlutterFlowApiException implements Exception {
+  final int? statusCode;
+  final String message;
+  final String? endpoint;
+  final String? body;
+  final String? note;
+  final bool isNetworkError;
+
+  const FlutterFlowApiException({
+    required this.message,
+    this.statusCode,
+    this.endpoint,
+    this.body,
+    this.note,
+    this.isNetworkError = false,
+  });
+
+  @override
+  String toString() {
+    final code = statusCode != null ? 'HTTP $statusCode' : 'No HTTP status';
+    return 'FlutterFlowApiException($code, endpoint: $endpoint, message: $message)';
   }
 }
