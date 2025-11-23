@@ -14,6 +14,7 @@ import '../widgets/project_header.dart';
 import '../widgets/yaml_content_viewer.dart';
 import '../widgets/modern_yaml_tree.dart';
 import '../widgets/ai_assist_panel.dart'; // Import the new AI Assist panel
+import '../services/ai_service.dart';
 import '../services/flutterflow_api_service.dart'; // Import FlutterFlow API service
 import '../theme/app_theme.dart';
 // import '../services/validation_service.dart'; // File doesn't exist
@@ -916,7 +917,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // Add AI Assist panel
             if (_showAIAssist)
               AIAssistPanel(
-                onUpdateYaml: _updateYamlFromAI,
+                onMergeChanges: _updateYamlFromAI,
                 currentFiles: _exportedFiles,
                 onClose: _handleAIAssist,
               ),
@@ -1961,73 +1962,58 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Method to handle AI-generated YAML updates
-  Future<void> _updateYamlFromAI(String yamlContent,
-      {String? existingFile}) async {
-    if (yamlContent.isEmpty) return;
+  Future<void> _updateYamlFromAI(List<FileModification> modifications) async {
+    if (modifications.isEmpty) return;
 
-    if (existingFile != null && _exportedFiles.containsKey(existingFile)) {
-      // Update existing file - put it in editing mode like a manual edit
-      setState(() {
-        // Back up the original if this is the first modification
-        if (!_originalFiles.containsKey(existingFile)) {
-          _originalFiles[existingFile] = _exportedFiles[existingFile]!;
-        }
+    for (final modification in modifications) {
+      final filePath = modification.filePath;
+      final newContent = modification.newContent;
 
-        // Update the file content but don't auto-save - let user review and save manually
-        _exportedFiles[existingFile] = yamlContent;
-        _changedFiles[existingFile] = yamlContent;
-        _hasModifications = true;
+      if (_exportedFiles.containsKey(filePath)) {
+        setState(() {
+          if (!_originalFiles.containsKey(filePath)) {
+            _originalFiles[filePath] = _exportedFiles[filePath]!;
+          }
 
-        _operationMessage =
-            'AI-generated changes applied to "$existingFile". Review the changes and click Save to upload to FlutterFlow.';
-        _generatedYamlMessage = _operationMessage;
+          _exportedFiles[filePath] = newContent;
+          _changedFiles[filePath] = newContent;
+          _hasModifications = true;
 
-        // Make sure the file is expanded and selected for viewing
-        _expandedFiles.add(existingFile);
-        _selectedFilePath = existingFile;
+          _operationMessage =
+              'AI-generated changes applied to "$filePath". Review the changes and click Save to upload to FlutterFlow.';
+          _generatedYamlMessage = _operationMessage;
 
-        // Update the controller and put in editing mode so Save/Discard buttons appear
-        if (!_fileControllers.containsKey(existingFile)) {
-          _fileControllers[existingFile] =
-              TextEditingController(text: yamlContent);
-        } else {
-          _fileControllers[existingFile]!.text = yamlContent;
-        }
+          _expandedFiles.add(filePath);
+          _selectedFilePath = filePath;
 
-        // Switch to tree view to show the updated file
-        _selectedViewIndex = 1;
-      });
+          if (!_fileControllers.containsKey(filePath)) {
+            _fileControllers[filePath] = TextEditingController(text: newContent);
+          } else {
+            _fileControllers[filePath]!.text = newContent;
+          }
 
-      // Mark the file as changed through the normal workflow to ensure proper tracking
-      await _applyFileChanges(existingFile, yamlContent);
-    } else {
-      // Create a new file with AI-generated content
-      final String fileName =
-          'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
+          _selectedViewIndex = 1;
+        });
 
-      setState(() {
-        // Add to all the file maps so it appears in the tree
-        _exportedFiles[fileName] = yamlContent;
-        _changedFiles[fileName] = yamlContent;
-        _hasModifications = true;
+        await _applyFileChanges(filePath, newContent);
+      } else {
+        setState(() {
+          _exportedFiles[filePath] = newContent;
+          _changedFiles[filePath] = newContent;
+          _hasModifications = true;
 
-        _operationMessage =
-            'AI-generated YAML file "$fileName" created. Review and click Save to upload to FlutterFlow.';
-        _generatedYamlMessage = _operationMessage;
+          _operationMessage =
+              'AI-generated YAML file "$filePath" created. Review and click Save to upload to FlutterFlow.';
+          _generatedYamlMessage = _operationMessage;
 
-        // Auto-expand and select the new file so it's visible
-        _expandedFiles.add(fileName);
-        _selectedFilePath = fileName;
+          _expandedFiles.add(filePath);
+          _selectedFilePath = filePath;
 
-        // Create a controller for the new file
-        _fileControllers[fileName] = TextEditingController(text: yamlContent);
+          _fileControllers[filePath] = TextEditingController(text: newContent);
 
-        // Switch to tree view to show the new file
-        _selectedViewIndex = 1;
-      });
-
-      // Mark the new file as changed through the normal workflow
-      await _applyFileChanges(fileName, yamlContent);
+          _selectedViewIndex = 1;
+        });
+      }
     }
   }
 
