@@ -5,6 +5,7 @@ import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../storage/preferences_manager.dart';
 import '../services/flutterflow_api_service.dart';
+import '../services/yaml_file_utils.dart';
 
 class YamlContentViewer extends StatefulWidget {
   final String? content;
@@ -12,6 +13,7 @@ class YamlContentViewer extends StatefulWidget {
   final bool isReadOnly;
   final Function(String)? onContentChanged;
   final Function(String)? onFileUpdated;
+  final void Function(String oldPath, String newPath)? onFileRenamed;
   final String filePath;
   final String projectId;
   // When true, indicates the parent has staged local edits (e.g., from AI)
@@ -35,6 +37,7 @@ class YamlContentViewer extends StatefulWidget {
     this.isReadOnly = true,
     this.onContentChanged,
     this.onFileUpdated,
+      this.onFileRenamed,
     this.filePath = '',
     this.projectId = '',
     this.hasPendingLocalEdits = false,
@@ -55,6 +58,11 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   bool _hasUnsavedChanges = false; // Track unsaved changes
   String? _validationError;
   bool _isValid = true;
+  // Controllers for scrollable error/details and viewer to avoid overflow
+  final ScrollController _errorVController = ScrollController();
+  final ScrollController _errorHController = ScrollController();
+  final ScrollController _viewerVController = ScrollController();
+  final ScrollController _viewerHController = ScrollController();
 
   @override
   void initState() {
@@ -93,6 +101,10 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   void dispose() {
     _textController.removeListener(_onTextChanged);
     _textController.dispose();
+    _errorVController.dispose();
+    _errorHController.dispose();
+    _viewerVController.dispose();
+    _viewerHController.dispose();
     super.dispose();
   }
 
@@ -180,7 +192,11 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                   .toString();
           setState(() {
             _isValid = false;
-            _validationError = _formatValidationMessage(errorMsg);
+            _validationError = _formatValidationMessage(
+              errorMsg,
+              yamlContent: content,
+              currentFilePath: widget.filePath,
+            );
           });
         }
       } else if (response.statusCode == 400) {
@@ -195,13 +211,18 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             _isValid = false;
             _validationError = _formatValidationMessage(
               combined.isEmpty ? response.body : combined,
+              yamlContent: content,
+              currentFilePath: widget.filePath,
             );
           });
         } catch (e) {
           setState(() {
             _isValid = false;
             _validationError = _formatValidationMessage(
-                'Validation failed (HTTP ${response.statusCode}): ${response.body}');
+              'Validation failed (HTTP ${response.statusCode}): ${response.body}',
+              yamlContent: content,
+              currentFilePath: widget.filePath,
+            );
           });
         }
       } else if (response.statusCode == 401) {
@@ -248,6 +269,9 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       _isUpdating = true;
     });
 
+    String effectiveFilePath = widget.filePath;
+    String? attemptedFileKey;
+
     try {
       // Get the API token from storage
       final apiToken = await PreferencesManager.getApiKey();
@@ -261,11 +285,28 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         return;
       }
 
-      // Convert the file path to the format expected by the API
-      final fileKey = FlutterFlowApiService.getFileKey(widget.filePath);
-      final fileKeyToContent = {fileKey: content};
+      final inferredPath = YamlFileUtils.inferFilePathFromContent(content);
+      if (inferredPath != null && inferredPath != widget.filePath) {
+        debugPrint(
+            'Detected mismatch between file path and YAML key. Renaming "${widget.filePath}" -> "$inferredPath" before upload.');
+        widget.onFileRenamed?.call(widget.filePath, inferredPath);
+        effectiveFilePath = inferredPath;
+      }
 
-      print('Updating file via API: ${widget.filePath} -> key: "$fileKey"');
+      // Convert the file path to the format expected by the API
+      attemptedFileKey = FlutterFlowApiService.getFileKey(effectiveFilePath);
+
+      final inferredFileKey = YamlFileUtils.inferFileKeyFromContent(content);
+      if (inferredFileKey != null && inferredFileKey != attemptedFileKey) {
+        debugPrint(
+            'Overriding derived file key "$attemptedFileKey" with inferred key "$inferredFileKey" based on YAML content.');
+        attemptedFileKey = inferredFileKey;
+      }
+
+      final fileKeyToContent = {attemptedFileKey!: content};
+
+      print(
+          'Updating file via API: $effectiveFilePath -> key: "$attemptedFileKey"');
 
       // Call the FlutterFlow API
       await FlutterFlowApiService.updateProjectYaml(
@@ -274,7 +315,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         fileKeyToContent: fileKeyToContent,
       );
 
-      print('Successfully updated file via API: ${widget.filePath}');
+      print('Successfully updated file via API: $effectiveFilePath');
 
       // Clear any previous errors on successful update
       setState(() {
@@ -284,7 +325,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
 
       // Notify that the file was updated via API
       if (widget.onFileUpdated != null) {
-        widget.onFileUpdated!(widget.filePath);
+        widget.onFileUpdated!(effectiveFilePath);
       }
     } catch (e) {
       debugPrint('Error updating file via API: $e');
@@ -298,9 +339,6 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         if (e.isNetworkError) {
           userFriendlyError =
               '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
-        } else if (status != null && status >= 400 && status < 500) {
-          final bodyText = (e.body ?? e.message);
-          userFriendlyError = _formatValidationMessage(bodyText);
         } else if (status == 401) {
           userFriendlyError =
               '🔑 Authentication Error: Invalid API token. Please check your credentials.';
@@ -310,9 +348,33 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         } else if (status == 404) {
           userFriendlyError =
               '🔍 Project Not Found: Check your project ID or API token.';
+        } else if (status != null && status >= 400 && status < 500) {
+          final bodyText = (e.body ?? e.message);
+          final formatted = _formatValidationMessage(
+            bodyText,
+            yamlContent: content,
+            currentFilePath: effectiveFilePath,
+          );
+          final detailed = _composeUpdateErrorMessage(
+            filePath: effectiveFilePath,
+            attemptedFileKey: attemptedFileKey,
+            exception: e,
+            yamlContent: content,
+          );
+          // Use the specialized validation formatter when it provides
+          // location details; otherwise surface the detailed API message.
+          if (_isFormattedValidationMessage(bodyText, formatted)) {
+            userFriendlyError = formatted;
+          } else {
+            userFriendlyError = detailed;
+          }
         } else {
-          userFriendlyError =
-              '⚠️ Update Failed (${e.statusCode ?? 'unknown'}): ${e.message}';
+          userFriendlyError = _composeUpdateErrorMessage(
+            filePath: effectiveFilePath,
+            attemptedFileKey: attemptedFileKey,
+            exception: e,
+            yamlContent: content,
+          );
         }
       } else if (errorString.contains('400')) {
         // Parse specific 400 errors
@@ -323,7 +385,11 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           userFriendlyError =
               '🗂️ File Error: Invalid file path for FlutterFlow. This file may not be supported.';
         } else {
-          userFriendlyError = _formatValidationMessage(errorString);
+          userFriendlyError = _formatValidationMessage(
+            errorString,
+            yamlContent: content,
+            currentFilePath: effectiveFilePath,
+          );
         }
       } else if (errorString.contains('401')) {
         userFriendlyError =
@@ -351,6 +417,81 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         _isUpdating = false;
       });
     }
+  }
+
+  String _composeUpdateErrorMessage({
+    required String filePath,
+    required String? attemptedFileKey,
+    required FlutterFlowApiException exception,
+    required String yamlContent,
+  }) {
+    final lines = <String>['❌ Update Failed'];
+    lines.add('• File: $filePath');
+    if (attemptedFileKey != null && attemptedFileKey.isNotEmpty) {
+      lines.add('• API key sent: $attemptedFileKey');
+    }
+    if (exception.statusCode != null) {
+      lines.add('• HTTP status: ${exception.statusCode}');
+    }
+    if (exception.endpoint != null && exception.endpoint!.isNotEmpty) {
+      lines.add('• Endpoint: ${exception.endpoint}');
+    }
+    if (exception.note != null && exception.note!.isNotEmpty) {
+      lines.add('• Note: ${exception.note}');
+    }
+    if (exception.message.isNotEmpty) {
+      lines.add('• Message: ${exception.message}');
+    }
+    if (exception.body != null &&
+        exception.body!.isNotEmpty &&
+        exception.body != exception.message) {
+      lines.add('• Response body: ${exception.body}');
+    }
+
+    final inferredPath = YamlFileUtils.inferFilePathFromContent(yamlContent);
+    final inferredKey = YamlFileUtils.inferFileKeyFromContent(yamlContent);
+    final rawBody = exception.body ?? '';
+    final message = exception.message;
+    final isInvalidFileKey = message.contains('Invalid file key') ||
+        rawBody.contains('Invalid file key');
+
+    if (isInvalidFileKey && inferredKey != null) {
+      lines.add('• Expected key (from YAML key field): $inferredKey');
+      if (inferredPath != null) {
+        lines.add('• Suggested file path: $inferredPath');
+      }
+      lines.addAll([
+        'How to fix:',
+        '• Ensure the YAML "key" field matches the file name you are editing.',
+        '• For new pages, store the file as "page/<page-key>.yaml" and add the entry to app-details.yaml and folders.yaml before syncing.',
+      ]);
+    }
+
+    final failedSection = _extractFailedSection(exception);
+    // Only add the generic "open the section" tip when there are other
+    // actionable hints. If it would be the only tip, skip it (users found it
+    // unhelpful in isolation).
+    if (failedSection != null) {
+      final hasActionables = lines.any((l) =>
+          l.contains('🔧') ||
+          l.startsWith('How to fix:') ||
+          l.contains('Suggested file path:') ||
+          l.contains('Expected key (from YAML key field)'));
+
+      if (hasActionables) {
+        lines.add(
+          '💡 Tip: Open the section "$failedSection" and fix the highlighted key/value, then press Save again.',
+        );
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  bool _isFormattedValidationMessage(String original, String formatted) {
+    final trimmed = original.trim();
+    final defaultMessage = '❌ Update Failed: $trimmed';
+    return formatted != defaultMessage;
   }
 
   // Save changes and exit edit mode
@@ -427,55 +568,94 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           // Header with controls
           _buildHeader(),
 
-          // Validation error display
+          // Validation error display (capped height + scroll to avoid overflow)
           if (_validationError != null)
-            Container(
-              margin: const EdgeInsets.all(16),
+            Padding(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.errorColor.withOpacity(0.1),
-                border: Border.all(color: AppTheme.errorColor.withOpacity(0.3)),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.error_outline,
-                          color: AppTheme.errorColor, size: 20),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Error Details',
-                          style: TextStyle(
-                            color: AppTheme.errorColor,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.errorColor.withOpacity(0.1),
+                  border:
+                      Border.all(color: AppTheme.errorColor.withOpacity(0.3)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline,
+                              color: AppTheme.errorColor, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Error Details',
+                              style: TextStyle(
+                                color: AppTheme.errorColor,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.backgroundColor,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: AppTheme.dividerColor),
-                    ),
-                    child: Text(
-                      _validationError!,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 14,
-                        fontFamily: 'monospace',
-                        height: 1.4,
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                    // Scrollable error body with both vertical and horizontal scroll
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final maxErrorHeight =
+                            MediaQuery.of(context).size.height * 0.4;
+                        return ConstrainedBox(
+                          constraints: BoxConstraints(
+                            // Cap height so it never pushes content off-screen
+                            maxHeight: maxErrorHeight,
+                          ),
+                          child: Container(
+                            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            decoration: BoxDecoration(
+                              color: AppTheme.backgroundColor,
+                              borderRadius: BorderRadius.circular(6),
+                              border:
+                                  Border.all(color: AppTheme.dividerColor),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Scrollbar(
+                                controller: _errorVController,
+                                thumbVisibility: true,
+                                child: SingleChildScrollView(
+                                  controller: _errorVController,
+                                  padding: const EdgeInsets.all(12),
+                                  child: Scrollbar(
+                                    controller: _errorHController,
+                                    thumbVisibility: false,
+                                    notificationPredicate: (notif) =>
+                                        notif.metrics.axis == Axis.horizontal,
+                                    child: SingleChildScrollView(
+                                      controller: _errorHController,
+                                      scrollDirection: Axis.horizontal,
+                                      child: SelectableText(
+                                        _validationError!,
+                                        style: TextStyle(
+                                          color: AppTheme.textPrimary,
+                                          fontSize: 14,
+                                          fontFamily: 'monospace',
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
 
@@ -676,11 +856,26 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       child: Container(
         padding: const EdgeInsets.all(16),
         color: AppTheme.backgroundColor,
-        child: SingleChildScrollView(
-          child: Text(
-            content,
-            style: AppTheme.monospace.copyWith(
-              color: AppTheme.textPrimary, // Use theme's white text
+        child: Scrollbar(
+          controller: _viewerVController,
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            controller: _viewerVController,
+            child: Scrollbar(
+              controller: _viewerHController,
+              thumbVisibility: false,
+              notificationPredicate: (notif) =>
+                  notif.metrics.axis == Axis.horizontal,
+              child: SingleChildScrollView(
+                controller: _viewerHController,
+                scrollDirection: Axis.horizontal,
+                child: SelectableText(
+                  content,
+                  style: AppTheme.monospace.copyWith(
+                    color: AppTheme.textPrimary, // Use theme's white text
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -760,21 +955,39 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   // Format server validation errors like:
   // "theme/color-scheme: (1:1): Unknown field name 'colors'"
   // into a friendly, actionable message.
-  String _formatValidationMessage(String raw) {
+  String _formatValidationMessage(
+    String raw, {
+    String? yamlContent,
+    String? currentFilePath,
+  }) {
     final text = raw.trim();
     final pattern = RegExp(r'^(.*?):\s*\((\d+):(\d+)\)\s*:\s*(.*)$');
     final match = pattern.firstMatch(text);
     if (match != null) {
-      final path = match.group(1)!.trim();
-      final line = match.group(2);
-      final col = match.group(3);
+      final rawLocation = match.group(1)!.trim();
+      final line = int.tryParse(match.group(2) ?? '');
+      final col = int.tryParse(match.group(3) ?? '');
       final detail = match.group(4)!.trim();
-      return [
+      final normalizedLocation = _normalizeValidationLocation(
+        rawLocation,
+        fallback: currentFilePath,
+      );
+      final fixHint = _buildFixHint(detail, normalizedLocation);
+      final snippet = (yamlContent != null && line != null && col != null)
+          ? _buildContextSnippet(yamlContent, line, col)
+          : null;
+
+      final segments = <String>[
         '❌ YAML Validation Failed',
-        '• Location: $path (line $line, col $col)',
-        '• Details: $detail',
-        '💡 Tip: Open the section "$path" and fix the highlighted key/value, then press Save again.',
-      ].join('\n');
+        if (normalizedLocation != null && normalizedLocation.isNotEmpty)
+          '• File: $normalizedLocation',
+        '• Line/col: ${line ?? '?'}:${col ?? '?'}',
+        '• Problem: $detail',
+        if (fixHint != null) fixHint,
+        if (snippet != null) '📄 Context:\n$snippet',
+      ];
+
+      return segments.join('\n');
     }
 
     // Fallback: try to extract only line/col
@@ -783,15 +996,130 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       final line = lc.group(1);
       final col = lc.group(2);
       final after = text.contains('):') ? text.split('):').last.trim() : '';
+      final fixHint = _buildFixHint(after, currentFilePath);
+      final snippet = (yamlContent != null && line != null && col != null)
+          ? _buildContextSnippet(
+              yamlContent,
+              int.tryParse(line) ?? 0,
+              int.tryParse(col) ?? 0,
+            )
+          : null;
       return [
         '❌ YAML Validation Failed',
         '• Location: line $line, col $col',
         if (after.isNotEmpty) '• Details: $after',
+        if (fixHint != null) fixHint,
         '💡 Tip: Check indentation, quotes, and key names at this position.',
+        if (snippet != null) '📄 Context:\n$snippet',
       ].join('\n');
     }
 
     // Default: show raw with a clean prefix
-    return '❌ Update Failed: $text';
+    return [
+      '❌ Update Failed: $text',
+      if (currentFilePath != null && currentFilePath.isNotEmpty)
+        'File: $currentFilePath',
+    ].join('\n');
+  }
+
+  String? _normalizeValidationLocation(String raw, {String? fallback}) {
+    final cleaned = raw
+        .replaceFirst(RegExp(r'^Failed to update project:\s*'), '')
+        .replaceFirst(RegExp(r'^Validation failed for file:\s*'), '')
+        .trim();
+
+    if (cleaned.isNotEmpty) {
+      return cleaned;
+    }
+
+    if (fallback == null) {
+      return null;
+    }
+
+    final trimmed = fallback.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  String? _buildFixHint(String detail, String? location) {
+    final target = (location == null || location.isEmpty) ? 'this file' : location;
+
+    final unknownFieldMatch =
+        RegExp(r"Unknown field name '([^']+)'", caseSensitive: false)
+            .firstMatch(detail);
+    if (unknownFieldMatch != null) {
+      final field = unknownFieldMatch.group(1);
+      return '🔧 Fix: FlutterFlow does not recognize the "$field" key in $target. Compare this file with an exported copy from FlutterFlow and rename or remove that key before saving.';
+    }
+
+    final missingFieldMatch =
+        RegExp(r"Missing required field '([^']+)'", caseSensitive: false)
+            .firstMatch(detail);
+    if (missingFieldMatch != null) {
+      final field = missingFieldMatch.group(1);
+      return '🔧 Fix: Add the required "$field" field to $target. Copy the default structure from FlutterFlow or another working file to ensure all mandatory fields are present.';
+    }
+
+    if (detail.toLowerCase().contains('duplicate key')) {
+      return '🔧 Fix: Remove one of the duplicate keys in $target. YAML files must only declare each key once at the same indentation level.';
+    }
+
+    if (detail.toLowerCase().contains('expected') &&
+        detail.toLowerCase().contains('but got')) {
+      return '🔧 Fix: Update the value at $target to match the expected data type. For example, wrap strings in quotes and ensure numbers are not quoted unless required.';
+    }
+
+    return null;
+  }
+
+  String _buildContextSnippet(String yamlContent, int line, int column) {
+    if (line <= 0) {
+      return yamlContent.split('\n').take(5).join('\n');
+    }
+
+    final lines = yamlContent.split('\n');
+    final targetIndex = line - 1;
+    if (targetIndex < 0 || targetIndex >= lines.length) {
+      return lines.take(5).join('\n');
+    }
+    final start = targetIndex - 2 < 0 ? 0 : targetIndex - 2;
+    final endExclusive = (targetIndex + 3) >= lines.length
+        ? lines.length
+        : targetIndex + 3;
+    final buffer = StringBuffer();
+
+    for (var i = start; i < endExclusive; i++) {
+      final lineNo = (i + 1).toString().padLeft(4);
+      buffer.writeln('$lineNo | ${lines[i]}');
+      if (i == targetIndex) {
+        final lineLength = lines[i].length;
+        final effectiveColumn = column.clamp(1, lineLength + 1).toInt();
+        final caretPosition = effectiveColumn <= 1
+            ? ''
+            : ' ' * (effectiveColumn - 1);
+        buffer.writeln('     | ${caretPosition}^');
+      }
+    }
+
+    return buffer.toString().trimRight();
+  }
+
+  String? _extractFailedSection(FlutterFlowApiException exception) {
+    final candidates = {
+      exception.message,
+      exception.body,
+      exception.note,
+    };
+
+    for (final raw in candidates) {
+      final value = raw?.trim();
+      if (value == null || value.isEmpty) continue;
+
+      final match = RegExp(r'Failed to update project:\s*([^\n]+)').firstMatch(value);
+      if (match != null) {
+        return match.group(1)?.trim();
+      }
+    }
+
+    return null;
   }
 }

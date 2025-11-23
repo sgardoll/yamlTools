@@ -14,6 +14,7 @@ import '../widgets/modern_yaml_tree.dart';
 import '../widgets/ai_assist_panel.dart'; // Import the new AI Assist panel
 import '../services/ai/ai_models.dart'; // Import AI models
 import '../services/flutterflow_api_service.dart'; // Import FlutterFlow API service
+import '../services/yaml_file_utils.dart';
 import '../theme/app_theme.dart';
 // import '../services/validation_service.dart'; // File doesn't exist
 // import '../services/yaml_service.dart'; // File doesn't exist
@@ -1161,6 +1162,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             );
                                           }
                                         : null,
+                                    onFileRenamed: _handleFileRenamed,
                                     onFileUpdated: _selectedFilePath != null
                                         ? (filePath) {
                                             // Update sync timestamp when file is successfully updated via API
@@ -1691,48 +1693,136 @@ class _HomeScreenState extends State<HomeScreen> {
       {String? existingFile}) async {
     if (yamlContent.isEmpty) return;
 
+    final inferredPath = YamlFileUtils.inferFilePathFromContent(yamlContent);
+
     if (existingFile != null && _exportedFiles.containsKey(existingFile)) {
+      String targetPath = existingFile;
+
+      if (inferredPath != null && inferredPath != existingFile) {
+        setState(() {
+          targetPath = _renameFileAcrossState(existingFile, inferredPath);
+        });
+      }
+
       // Stage the change first so timestamps are set and the tree shows Unsaved immediately
       await _applyFileChanges(
-        existingFile,
+        targetPath,
         yamlContent,
         validated: false,
         messageOverride:
-            'AI-generated changes applied to "$existingFile". Review the changes and click Save to upload to FlutterFlow.',
+            'AI-generated changes applied to "$targetPath". Review the changes and click Save to upload to FlutterFlow.',
       );
 
       // Now update selection and controllers for editing UI
       setState(() {
-        _expandedFiles.add(existingFile);
-        _selectedFilePath = existingFile;
-        if (!_fileControllers.containsKey(existingFile)) {
-          _fileControllers[existingFile] =
-              TextEditingController(text: yamlContent);
-        } else {
-          _fileControllers[existingFile]!.text = yamlContent;
-        }
+        _expandedFiles.add(targetPath);
+        _selectedFilePath = targetPath;
+        final controller =
+            _fileControllers[targetPath] ?? TextEditingController();
+        controller.text = yamlContent;
+        _fileControllers[targetPath] = controller;
       });
     } else {
       // Create a new file with AI-generated content
-      final String fileName =
-          'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
+      final rawDesiredPath = inferredPath ?? _generateTemporaryAiFileName();
+      final filePath = _ensureUniqueFilePath(rawDesiredPath);
 
       // Stage the new file first so Unsaved indicator appears immediately
       await _applyFileChanges(
-        fileName,
+        filePath,
         yamlContent,
         validated: false,
         messageOverride:
-            'AI-generated YAML file "$fileName" created. Review and click Save to upload to FlutterFlow.',
+            'AI-generated YAML file "$filePath" created. Review and click Save to upload to FlutterFlow.',
       );
 
       // Then set selection and editor state
       setState(() {
-        _expandedFiles.add(fileName);
-        _selectedFilePath = fileName;
-        _fileControllers[fileName] = TextEditingController(text: yamlContent);
+        _expandedFiles.add(filePath);
+        _selectedFilePath = filePath;
+        _fileControllers[filePath] = TextEditingController(text: yamlContent);
       });
     }
+  }
+
+  String _generateTemporaryAiFileName() {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return 'ai_generated_$timestamp.yaml';
+  }
+
+  String _normalizeFilePath(String path) {
+    final trimmed = path.trim();
+    if (trimmed.isEmpty) {
+      return 'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
+    }
+    return trimmed.endsWith('.yaml') ? trimmed : '$trimmed.yaml';
+  }
+
+  String _ensureUniqueFilePath(String desiredPath, {String? excludePath}) {
+    String candidate = _normalizeFilePath(desiredPath);
+    if (!_exportedFiles.containsKey(candidate) || candidate == excludePath) {
+      return candidate;
+    }
+
+    final base = candidate.endsWith('.yaml')
+        ? candidate.substring(0, candidate.length - 5)
+        : candidate;
+    int counter = 1;
+    String attempt;
+    do {
+      attempt = '${base}_$counter.yaml';
+      counter++;
+    } while (_exportedFiles.containsKey(attempt) && attempt != excludePath);
+
+    return attempt;
+  }
+
+  String _renameFileAcrossState(String oldPath, String desiredNewPath) {
+    final newPath = _ensureUniqueFilePath(desiredNewPath, excludePath: oldPath);
+    if (newPath == oldPath) {
+      return oldPath;
+    }
+
+    V? moveEntry<V>(Map<String, V> map) {
+      if (!map.containsKey(oldPath)) return null;
+      final value = map.remove(oldPath);
+      if (value != null) {
+        map[newPath] = value;
+      }
+      return value;
+    }
+
+    moveEntry(_exportedFiles);
+    moveEntry(_originalFiles);
+    moveEntry(_changedFiles);
+    moveEntry(_fileControllers);
+    moveEntry(_fileValidationTimestamps);
+    moveEntry(_fileUpdateTimestamps);
+    moveEntry(_fileSyncTimestamps);
+
+    if (_expandedFiles.remove(oldPath)) {
+      _expandedFiles.add(newPath);
+    }
+
+    if (_selectedFilePath == oldPath) {
+      _selectedFilePath = newPath;
+    }
+
+    return newPath;
+  }
+
+  void _handleFileRenamed(String oldPath, String newPath) {
+    if (oldPath == newPath) return;
+
+    setState(() {
+      final resolvedPath = _renameFileAcrossState(oldPath, newPath);
+      if (resolvedPath != oldPath) {
+        _operationMessage =
+            'Updated file path to "$resolvedPath" to match FlutterFlow requirements.';
+        _generatedYamlMessage =
+            '$_operationMessage\n\nReview the file and press Save to validate again if needed.';
+      }
+    });
   }
 
   // Helper method for consistent button styling

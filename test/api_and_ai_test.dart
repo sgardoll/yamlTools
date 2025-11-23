@@ -6,6 +6,7 @@ import 'package:yaml_generator_app/services/ai/ai_models.dart';
 import 'package:yaml_generator_app/services/ai/ai_service.dart';
 import 'package:yaml_generator_app/services/ai/openai_client.dart';
 import 'package:yaml_generator_app/services/flutterflow_api_service.dart';
+import 'package:yaml_generator_app/services/yaml_file_utils.dart';
 
 class _FakeOpenAIClient extends OpenAIClient {
   _FakeOpenAIClient(this.fakeResponse) : super(apiKey: 'test-key');
@@ -63,6 +64,23 @@ void main() {
       expect(exception.message, 'Invalid file key');
       expect(exception.body, contains('Invalid file key'));
       expect(exception.note, 'validation failed');
+    });
+  });
+
+  group('YamlFileUtils', () {
+    test('infers page file path and key from YAML content', () {
+      const yaml = '''
+page:
+  key: id-Scaffold_example
+  name: Example
+  widgets: []
+''';
+
+      final path = YamlFileUtils.inferFilePathFromContent(yaml);
+      final key = YamlFileUtils.inferFileKeyFromContent(yaml);
+
+      expect(path, 'page/id-Scaffold_example.yaml');
+      expect(key, 'page/id-Scaffold_example');
     });
   });
 
