@@ -45,36 +45,40 @@ class AppHeader extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFF1F2937),
+                      Color(0xFF111827),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors.black.withOpacity(0.2),
                       offset: const Offset(0, 2),
-                      blurRadius: 4,
+                      blurRadius: 6,
                     ),
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4.0),
-                    child: Image.asset(
-                      'assets/images/app_logo.png',
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const Center(
-                          child: Icon(
-                            Icons.code,
-                            color: Color(0xFF4F46E5),
-                            size: 20,
-                          ),
-                        );
-                      },
-                    ),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset(
+                    'assets/images/app_logo.png',
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Center(
+                        child: Icon(
+                          Icons.code,
+                          color: Color(0xFF4F46E5),
+                          size: 20,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),

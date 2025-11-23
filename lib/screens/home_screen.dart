@@ -577,15 +577,15 @@ class _HomeScreenState extends State<HomeScreen> {
   // and falls back to a styled placeholder if the asset is missing.
   Widget _buildHeroLogo() {
     return Container(
-      width: 64,
-      height: 64,
+      width: 96,
+      height: 96,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF4F46E5), Color(0xFF3B82F6)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          colors: [Color(0xFF0F172A), Color(0xFF1F2937)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
             color: AppTheme.primaryColor.withOpacity(0.2),
@@ -595,7 +595,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         child: Image.asset(
           _heroImagePath,
           fit: BoxFit.cover,
