@@ -4,8 +4,14 @@
 *.log
 *.pyc
 *.swp
+.DS_Store
 .buildlog/
 .history
+.idea/
+.vscode/
+.cursor/
+.dreamflow
+*.iml
 
 
 
@@ -41,6 +47,18 @@ analysis_benchmark.json
 .pub-preload-cache/
 .pub/
 build/
+/assets/
+/canvaskit/
+/icons/
+/flutter.js
+/flutter_bootstrap.js
+/flutter_service_worker.js
+/favicon.png
+/index.html
+/manifest.json
+/version.json
+/.nojekyll
+/noto-sans.zip
 flutter_*.png
 linked_*.ds
 unlinked.ds

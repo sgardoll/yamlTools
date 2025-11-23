@@ -6,6 +6,7 @@ class AppHeader extends StatelessWidget {
   final VoidCallback? onRecent;
   final VoidCallback? onReload;
   final VoidCallback? onAIAssist;
+  final bool showOnlyNewProject;
 
   const AppHeader({
     Key? key,
@@ -13,6 +14,7 @@ class AppHeader extends StatelessWidget {
     this.onRecent,
     this.onReload,
     this.onAIAssist,
+    this.showOnlyNewProject = false,
   }) : super(key: key);
 
   @override
@@ -98,33 +100,35 @@ class AppHeader extends StatelessWidget {
                 label: 'New Project',
                 isPrimary: true,
               ),
-              const SizedBox(width: 8),
+              if (!showOnlyNewProject) ...[
+                const SizedBox(width: 8),
 
-              // Recent Button
-              _buildHeaderButton(
-                onPressed: onRecent,
-                icon: Icons.history,
-                label: 'Recent',
-                backgroundColor: Colors.white.withOpacity(0.1),
-              ),
-              const SizedBox(width: 8),
+                // Recent Button
+                _buildHeaderButton(
+                  onPressed: onRecent,
+                  icon: Icons.history,
+                  label: 'Recent',
+                  backgroundColor: Colors.white.withOpacity(0.1),
+                ),
+                const SizedBox(width: 8),
 
-              // Reload Button (Success Green)
-              _buildHeaderButton(
-                onPressed: onReload,
-                icon: Icons.refresh,
-                label: 'Reload',
-                backgroundColor: Color(0xFF22C55E),
-              ),
-              const SizedBox(width: 8),
+                // Reload Button (Success Green)
+                _buildHeaderButton(
+                  onPressed: onReload,
+                  icon: Icons.refresh,
+                  label: 'Reload',
+                  backgroundColor: Color(0xFF22C55E),
+                ),
+                const SizedBox(width: 8),
 
-              // AI Assist Button (Orange/Pink)
-              _buildHeaderButton(
-                onPressed: onAIAssist,
-                icon: Icons.auto_awesome,
-                label: 'AI Assist',
-                backgroundColor: Color(0xFFEC4899),
-              ),
+                // AI Assist Button (Orange/Pink)
+                _buildHeaderButton(
+                  onPressed: onAIAssist,
+                  icon: Icons.auto_awesome,
+                  label: 'AI Assist',
+                  backgroundColor: Color(0xFFEC4899),
+                ),
+              ],
             ],
           ),
         ],

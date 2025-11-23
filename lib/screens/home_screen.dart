@@ -968,13 +968,14 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Custom app header
-                  AppHeader(
-                    onNewProject: _handleNewProject,
-                    onRecent: _handleRecentProjects,
-                    onReload: hasCredentials ? _fetchProjectYaml : null,
-                    onAIAssist: _handleAIAssist,
-                  ),
+          // Custom app header
+          AppHeader(
+            onNewProject: _handleNewProject,
+            onRecent: _handleRecentProjects,
+            onReload: hasCredentials ? _fetchProjectYaml : null,
+            onAIAssist: _handleAIAssist,
+            showOnlyNewProject: !hasYaml,
+          ),
 
                   // Project header if we have YAML loaded
                   if (hasYaml)
