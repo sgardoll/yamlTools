@@ -66,28 +66,22 @@ class AppHeader extends StatelessWidget {
               ),
               const SizedBox(width: 16),
               RichText(
-                text: const TextSpan(
-                  children: [
-                    TextSpan(
+                text: const TextSpan(children: [
+                  TextSpan(
                       text: 'FlutterFlow ',
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    TextSpan(
-                      text: 'YAML Editor AI',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: -0.5)),
+                  TextSpan(
+                      text: 'YAML Tools',
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w400,
-                        color: Colors.white70,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                  ],
-                ),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w400,
+                          color: Colors.white70,
+                          letterSpacing: -0.5))
+                ]),
               ),
             ],
           ),

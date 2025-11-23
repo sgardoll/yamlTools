@@ -37,6 +37,7 @@ class ModernYamlTree extends StatefulWidget {
   final Function(String)? onFileSelected;
   final Set<String>? expandedNodes;
   final Map<String, DateTime>? validationTimestamps;
+  final Map<String, DateTime>? syncTimestamps;
 
   const ModernYamlTree({
     Key? key,
@@ -44,6 +45,7 @@ class ModernYamlTree extends StatefulWidget {
     this.onFileSelected,
     this.expandedNodes,
     this.validationTimestamps,
+    this.syncTimestamps,
   }) : super(key: key);
 
   @override
@@ -339,6 +341,11 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         widget.validationTimestamps != null &&
         widget.validationTimestamps!.containsKey(node.filePath!);
 
+    // Check if this file was recently synced (updated on FlutterFlow)
+    bool isSynced = node.filePath != null &&
+        widget.syncTimestamps != null &&
+        widget.syncTimestamps!.containsKey(node.filePath!);
+
     // Check if this is an AI-generated file
     bool isAIGenerated = node.filePath?.startsWith('ai_generated_') ?? false;
 
@@ -427,44 +434,84 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
               ),
 
               // Status indicators
-              if (isAIGenerated)
-                Container(
-                  margin: EdgeInsets.only(left: 4),
-                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Color(0xFFEC4899).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(3),
-                    border: Border.all(color: Color(0xFFEC4899), width: 1),
-                  ),
-                  child: Text(
-                    'AI',
-                    style: TextStyle(
-                      fontSize: 8,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFFEC4899),
-                    ),
-                  ),
-                )
-              else if (isValidated)
-                Container(
-                  margin: EdgeInsets.only(left: 4),
-                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.validColor.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(3),
-                    border: Border.all(color: AppTheme.validColor, width: 1),
-                  ),
-                  child: Icon(
-                    Icons.verified,
-                    size: 10,
-                    color: AppTheme.validColor,
-                  ),
-                ),
+              ..._buildStatusIndicators(
+                isSynced: isSynced,
+                isAIGenerated: isAIGenerated,
+                isValidated: isValidated,
+              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  List<Widget> _buildStatusIndicators({
+    required bool isSynced,
+    required bool isAIGenerated,
+    required bool isValidated,
+  }) {
+    final List<Widget> indicators = [];
+
+    if (isSynced) {
+      indicators.add(
+        Container(
+          margin: const EdgeInsets.only(left: 4),
+          width: 16,
+          height: 16,
+          decoration: const BoxDecoration(
+            color: AppTheme.successColor,
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.check,
+            size: 10,
+            color: Colors.white,
+          ),
+        ),
+      );
+    }
+
+    if (isAIGenerated) {
+      indicators.add(
+        Container(
+          margin: const EdgeInsets.only(left: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEC4899).withOpacity(0.2),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: const Color(0xFFEC4899), width: 1),
+          ),
+          child: const Text(
+            'AI',
+            style: TextStyle(
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFFEC4899),
+            ),
+          ),
+        ),
+      );
+    } else if (isValidated) {
+      indicators.add(
+        Container(
+          margin: const EdgeInsets.only(left: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(
+            color: AppTheme.validColor.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: AppTheme.validColor, width: 1),
+          ),
+          child: Icon(
+            Icons.verified,
+            size: 10,
+            color: AppTheme.validColor,
+          ),
+        ),
+      );
+    }
+
+    return indicators;
   }
 
   IconData _getNodeIcon(NodeType type) {

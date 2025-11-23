@@ -348,6 +348,32 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Widget _buildSyncedTickIndicator() {
+    return Tooltip(
+      message: 'Recently synced to FlutterFlow',
+      child: Container(
+        width: 16,
+        height: 16,
+        decoration: BoxDecoration(
+          color: AppTheme.successColor,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.successColor.withOpacity(0.35),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.check,
+          size: 10,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
   Future<void> _fetchProjectYaml() async {
     final projectId = _projectIdController.text;
     final apiToken = _apiTokenController.text;
@@ -839,6 +865,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           expandedNodes: _expandedFiles,
                                           validationTimestamps:
                                               _fileValidationTimestamps,
+                                          syncTimestamps: _fileSyncTimestamps,
                                         ),
                                 ),
 
@@ -868,11 +895,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ? (filePath) {
                                             // Update sync timestamp when file is successfully updated via API
                                             setState(() {
-                                              _fileSyncTimestamps[
-                                                      _selectedFilePath!] =
+                                              _fileSyncTimestamps[filePath] =
                                                   DateTime.now();
                                               _operationMessage =
-                                                  'File "$_selectedFilePath" saved and synced to FlutterFlow.';
+                                                  'File "$filePath" saved and synced to FlutterFlow.';
                                               _generatedYamlMessage =
                                                   '$_operationMessage\n\nThe file has been updated in your FlutterFlow project.';
                                             });
@@ -1384,51 +1410,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                   padding:
                                                       const EdgeInsets.only(
                                                           left: 4.0),
-                                                  child: Tooltip(
-                                                    message:
-                                                        'Recently synced to FlutterFlow',
-                                                    child: Container(
-                                                      padding:
-                                                          EdgeInsets.symmetric(
-                                                              horizontal: 4,
-                                                              vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color:
-                                                            Colors.purple[100],
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(6),
-                                                        border: Border.all(
-                                                            color: Colors
-                                                                .purple[300]!,
-                                                            width: 1),
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons.cloud_done,
-                                                            size: 12,
-                                                            color: Colors
-                                                                .purple[700],
-                                                          ),
-                                                          SizedBox(width: 2),
-                                                          Text(
-                                                            'Synced',
-                                                            style: TextStyle(
-                                                              fontSize: 9,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .bold,
-                                                              color: Colors
-                                                                  .purple[800],
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
+                                                  child:
+                                                      _buildSyncedTickIndicator(),
                                                 )
                                               else if (_fileUpdateTimestamps
                                                   .containsKey(fileName))
