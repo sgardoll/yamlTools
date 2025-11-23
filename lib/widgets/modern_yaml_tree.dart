@@ -38,6 +38,7 @@ class ModernYamlTree extends StatefulWidget {
   final Set<String>? expandedNodes;
   final Map<String, DateTime>? validationTimestamps;
   final Map<String, DateTime>? syncTimestamps;
+  final Map<String, DateTime>? updateTimestamps;
 
   const ModernYamlTree({
     Key? key,
@@ -46,6 +47,7 @@ class ModernYamlTree extends StatefulWidget {
     this.expandedNodes,
     this.validationTimestamps,
     this.syncTimestamps,
+    this.updateTimestamps,
   }) : super(key: key);
 
   @override
@@ -346,6 +348,19 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         widget.syncTimestamps != null &&
         widget.syncTimestamps!.containsKey(node.filePath!);
 
+    // Check if this file has local edits that are not synced yet
+    bool isEditedNotSynced = false;
+    if (node.filePath != null && widget.updateTimestamps != null) {
+      final updatedAt = widget.updateTimestamps![node.filePath!];
+      if (updatedAt != null) {
+        final syncedAt = widget.syncTimestamps != null
+            ? widget.syncTimestamps![node.filePath!]
+            : null;
+        // Consider dirty when there's no sync, or last local update is newer than last sync
+        isEditedNotSynced = syncedAt == null || updatedAt.isAfter(syncedAt);
+      }
+    }
+
     // Check if this is an AI-generated file
     bool isAIGenerated = node.filePath?.startsWith('ai_generated_') ?? false;
 
@@ -438,6 +453,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
                 isSynced: isSynced,
                 isAIGenerated: isAIGenerated,
                 isValidated: isValidated,
+                isEditedNotSynced: isEditedNotSynced,
               ),
             ],
           ),
@@ -450,6 +466,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     required bool isSynced,
     required bool isAIGenerated,
     required bool isValidated,
+    required bool isEditedNotSynced,
   }) {
     final List<Widget> indicators = [];
 
@@ -489,6 +506,34 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
               fontWeight: FontWeight.bold,
               color: Color(0xFFEC4899),
             ),
+          ),
+        ),
+      );
+    } else if (isEditedNotSynced) {
+      // Show an explicit "Unsaved" badge when there are local edits not yet synced
+      indicators.add(
+        Container(
+          margin: const EdgeInsets.only(left: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.orange.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: Colors.orange, width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.pending_actions, size: 10, color: Colors.orange),
+              SizedBox(width: 3),
+              Text(
+                'Unsaved',
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.orange,
+                ),
+              ),
+            ],
           ),
         ),
       );

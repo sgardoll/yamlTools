@@ -14,6 +14,19 @@ class YamlContentViewer extends StatefulWidget {
   final Function(String)? onFileUpdated;
   final String filePath;
   final String projectId;
+  // When true, indicates the parent has staged local edits (e.g., from AI)
+  // and wants the editor to surface Save/Cancel immediately even if the user
+  // hasn't typed yet.
+  final bool hasPendingLocalEdits;
+
+  // When true and this file is opened/selected, the editor starts in edit mode
+  // so the Save/Cancel controls are visible.
+  final bool startInEditMode;
+
+  // Called when the user presses Discard while only pending local edits exist
+  // (i.e., before any additional manual edits). Parent can revert the file
+  // to its original content or remove the new file entirely.
+  final VoidCallback? onDiscardPendingEdits;
 
   const YamlContentViewer({
     Key? key,
@@ -24,6 +37,9 @@ class YamlContentViewer extends StatefulWidget {
     this.onFileUpdated,
     this.filePath = '',
     this.projectId = '',
+    this.hasPendingLocalEdits = false,
+    this.startInEditMode = false,
+    this.onDiscardPendingEdits,
   }) : super(key: key);
 
   @override
@@ -46,6 +62,10 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     _textController = TextEditingController(text: widget.content ?? '');
     // Listen for changes to track unsaved changes
     _textController.addListener(_onTextChanged);
+    // If we have pending local edits, surface edit mode immediately
+    if (widget.startInEditMode) {
+      _isEditing = true;
+    }
   }
 
   @override
@@ -58,6 +78,13 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         _validationError = null;
         _isValid = true;
         _hasUnsavedChanges = false;
+      });
+    }
+
+    // When switching files, respect the desired initial mode
+    if (oldWidget.filePath != widget.filePath) {
+      setState(() {
+        _isEditing = widget.startInEditMode;
       });
     }
   }
@@ -333,7 +360,9 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
 
   // Save changes and exit edit mode
   Future<void> _saveChanges() async {
-    if (!_hasUnsavedChanges) return;
+    // Allow saving when either the user has typed changes OR there are
+    // pending local edits staged by the parent (e.g., AI applied changes).
+    if (!_hasUnsavedChanges && !widget.hasPendingLocalEdits) return;
 
     final currentContent = _textController.text;
 
@@ -361,8 +390,20 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     });
   }
 
-  // Discard changes and exit edit mode
+    // Discard changes and exit edit mode
   void _discardChanges() {
+    // If we only have pending local edits (no manual typing), let parent
+    // revert the local edits to the original version.
+    if (widget.hasPendingLocalEdits && !_hasUnsavedChanges) {
+      widget.onDiscardPendingEdits?.call();
+      setState(() {
+        _hasUnsavedChanges = false;
+        _isEditing = false;
+      });
+      return;
+    }
+
+    // Otherwise, revert to the last provided content from parent
     setState(() {
       _textController.text = widget.content ?? '';
       _hasUnsavedChanges = false;
@@ -534,8 +575,9 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                       _isCopied ? AppTheme.validColor : AppTheme.textSecondary,
                 ),
 
-                // Save/Discard buttons when editing with unsaved changes
-                if (_isEditing && _hasUnsavedChanges) ...[
+                // Save/Discard buttons when editing with unsaved changes OR when
+                // the parent indicates there are pending local edits to confirm
+                if (_isEditing && (_hasUnsavedChanges || widget.hasPendingLocalEdits)) ...[
                   _buildActionButton(
                     icon: Icons.close,
                     label: 'Discard',
