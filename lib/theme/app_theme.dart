@@ -1,31 +1,31 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  // Main colors - Updated to match professional design
-  static const Color primaryColor = Color(0xFF3B82F6); // Blue-500
-  static const Color secondaryColor = Color(0xFFEC4899); // Pink-500 for AI
-  static const Color backgroundColor = Color(0xFF0F172A); // Slate-900
-  static const Color surfaceColor = Color(0xFF1E293B); // Slate-800
-  static const Color cardColor = Color(0xFF1E293B); // Slate-800
-  static const Color dividerColor = Color(0xFF334155); // Slate-700
-  static const Color borderColor = Color(0xFF475569); // Slate-600
+  // Core palette sourced from intro_logo.png
+  static const Color primaryColor = Color(0xFF3367DC); // Royal Blue
+  static const Color secondaryColor = Color(0xFF3EF6C3); // Tropical Mint
+  static const Color backgroundColor = Color(0xFF080A40); // Deep Navy
+  static const Color surfaceColor = Color(0xFF0B186C); // Deep Twilight
+  static const Color cardColor = Color(0xFF093BA1); // Egyptian Blue
+  static const Color dividerColor = Color(0xFF1B2F73); // Muted Royal Blue (derived)
+  static const Color borderColor = Color(0xFF2142A6); // Softened Egyptian Blue (derived)
 
   // Text colors
   static const Color textPrimary = Color(0xFFFFFFFF); // White
-  static const Color textSecondary = Color(0xFF94A3B8); // Slate-400
-  static const Color textMuted = Color(0xFF64748B); // Slate-500
-  static const Color textAccent = Color(0xFF3B82F6); // Blue-500
+  static const Color textSecondary = Color(0xFF9DAEF2); // Soft Royal Blue (derived)
+  static const Color textMuted = Color(0xFF6576CC); // Subtle twilight tone (derived)
+  static const Color textAccent = secondaryColor;
 
   // Status colors
   static const Color successColor = Color(0xFF22C55E); // Green-500
   static const Color errorColor = Color(0xFFEF4444); // Red-500
   static const Color warningColor = Color(0xFFF59E0B); // Amber-500
-  static const Color infoColor = Color(0xFF3B82F6); // Blue-500
+  static const Color infoColor = primaryColor; // Royal Blue
 
   // Validation status colors
   static const Color validColor = Color(0xFF22C55E); // Green-500
-  static const Color updatedColor = Color(0xFF3B82F6); // Blue-500
-  static const Color syncedColor = Color(0xFF8B5CF6); // Violet-500
+  static const Color updatedColor = primaryColor; // Royal Blue
+  static const Color syncedColor = secondaryColor; // Tropical Mint
 
   // Button styles
   static ButtonStyle primaryButtonStyle = ElevatedButton.styleFrom(
@@ -41,12 +41,12 @@ class AppTheme {
       borderRadius: BorderRadius.circular(8),
     ),
     elevation: 2,
-    shadowColor: primaryColor.withOpacity(0.2),
+    shadowColor: primaryColor.withOpacity(0.25),
   );
 
   static ButtonStyle secondaryButtonStyle = ElevatedButton.styleFrom(
     backgroundColor: surfaceColor,
-    foregroundColor: textPrimary,
+    foregroundColor: secondaryColor,
     textStyle: const TextStyle(
       fontWeight: FontWeight.w600,
       fontSize: 14,
@@ -55,14 +55,14 @@ class AppTheme {
     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(8),
-      side: BorderSide(color: borderColor, width: 1),
+      side: BorderSide(color: secondaryColor.withOpacity(0.6), width: 1),
     ),
     elevation: 0,
   );
 
   static ButtonStyle outlineButtonStyle = OutlinedButton.styleFrom(
-    foregroundColor: primaryColor,
-    side: const BorderSide(color: primaryColor, width: 1.5),
+    foregroundColor: secondaryColor,
+    side: const BorderSide(color: secondaryColor, width: 1.5),
     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(8),
@@ -94,7 +94,7 @@ class AppTheme {
   static BoxDecoration cardDecoration = BoxDecoration(
     color: cardColor,
     borderRadius: BorderRadius.circular(12),
-    border: Border.all(color: dividerColor, width: 1),
+    border: Border.all(color: borderColor, width: 1),
     boxShadow: [
       BoxShadow(
         color: Colors.black.withOpacity(0.1),
@@ -107,7 +107,7 @@ class AppTheme {
   static BoxDecoration panelDecoration = BoxDecoration(
     color: surfaceColor,
     borderRadius: BorderRadius.circular(8),
-    border: Border.all(color: dividerColor, width: 1),
+    border: Border.all(color: borderColor, width: 1),
   );
 
   // Text styles with improved typography
@@ -225,21 +225,21 @@ class AppTheme {
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide(
-          color: isError ? errorColor : borderColor,
+          color: isError ? errorColor : dividerColor,
           width: 1,
         ),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide(
-          color: isError ? errorColor : borderColor,
+          color: isError ? errorColor : dividerColor,
           width: 1,
         ),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide(
-          color: isError ? errorColor : primaryColor,
+          color: isError ? errorColor : secondaryColor,
           width: 2,
         ),
       ),
@@ -277,7 +277,7 @@ class AppTheme {
   // Gradient decorations
   static BoxDecoration primaryGradientDecoration = BoxDecoration(
     gradient: LinearGradient(
-      colors: [Color(0xFF4F46E5), Color(0xFF3B82F6)],
+      colors: [Color(0xFF0B186C), Color(0xFF3367DC)],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     ),

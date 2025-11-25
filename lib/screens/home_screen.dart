@@ -1080,8 +1080,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   // Custom app header
                   AppHeader(
-                    onNewProject: _handleNewProject,
-                    onRecent: _handleRecentProjects,
+                    // Hide "New Project" on the home screen when no YAML is loaded
+                    onNewProject: hasYaml ? _handleNewProject : null,
                     onReload: hasCredentials ? _fetchProjectYaml : null,
                     onAIAssist: _handleAIAssist,
                     showOnlyNewProject: !hasYaml,
