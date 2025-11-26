@@ -39,5 +39,34 @@ void main() {
       final result = FlutterFlowApiService.convertFileNamesToKeys({});
       expect(result, equals({}));
     });
+
+    test('getFileKey should strip archive prefixes and nested paths', () {
+      expect(
+        FlutterFlowApiService.getFileKey('archive_page/id-123.yaml'),
+        equals('page/id-123'),
+      );
+      expect(
+        FlutterFlowApiService
+            .getFileKey('archive_page/id-123/page-widget-tree-outline.yaml'),
+        equals('page/id-123/page-widget-tree-outline'),
+      );
+    });
+
+    test('buildFileKeyCandidates should include yaml-derived and extension keys',
+        () {
+      const content = '''
+page:
+  key: id-Scaffold_hur6kpbk
+  name: Home
+''';
+
+      final candidates = FlutterFlowApiService.buildFileKeyCandidates(
+        filePath: 'archive_page/id-Scaffold_hur6kpbk.yaml',
+        yamlContent: content,
+      );
+
+      expect(candidates, contains('page/id-Scaffold_hur6kpbk'));
+      expect(candidates, contains('page/id-Scaffold_hur6kpbk.yaml'));
+    });
   });
 }

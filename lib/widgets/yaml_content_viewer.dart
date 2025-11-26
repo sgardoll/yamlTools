@@ -58,6 +58,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   bool _hasUnsavedChanges = false; // Track unsaved changes
   String? _validationError;
   bool _isValid = true;
+  String? _lastValidatedFileKey;
   // Controllers for scrollable error/details and viewer to avoid overflow
   final ScrollController _errorVController = ScrollController();
   final ScrollController _errorHController = ScrollController();
@@ -86,6 +87,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         _validationError = null;
         _isValid = true;
         _hasUnsavedChanges = false;
+        _lastValidatedFileKey = null;
       });
     }
 
@@ -93,6 +95,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     if (oldWidget.filePath != widget.filePath) {
       setState(() {
         _isEditing = widget.startInEditMode;
+        _lastValidatedFileKey = null;
       });
     }
   }
@@ -148,102 +151,126 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       }
 
       // Extract file key from the file path using the same method as update
-      final fileKey = FlutterFlowApiService.getFileKey(widget.filePath);
-
-      debugPrint('Validating file: ${widget.filePath} -> key: "$fileKey"');
-
-      // Create request payload
-      final requestBody = json.encode({
-        'projectId': widget.projectId,
-        'fileKey': fileKey,
-        'fileContent': content,
-      });
-
-      // For web, we're using a CORS proxy initialized in index.html
-      final apiUrl = '${FlutterFlowApiService.baseUrl}/validateProjectYaml';
-      debugPrint('Sending validation request to: $apiUrl');
-
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Authorization': 'Bearer $apiToken',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          // Add cache control to prevent caching issues
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-        },
-        body: requestBody,
+      final candidateKeys = FlutterFlowApiService.buildFileKeyCandidates(
+        filePath: widget.filePath,
+        yamlContent: content,
       );
 
-      debugPrint('Validation response status: ${response.statusCode}');
-      debugPrint('Validation response body: ${response.body}');
+      debugPrint(
+          'Validating file: ${widget.filePath} -> candidates: ${candidateKeys.map((k) => '"$k"').join(', ')}');
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          setState(() {
-            _isValid = true;
-            _validationError = null;
-          });
-        } else {
-          final errorMsg =
-              (data['error'] ?? data['message'] ?? 'Invalid YAML format')
-                  .toString();
-          setState(() {
-            _isValid = false;
-            _validationError = _formatValidationMessage(
+      final apiUrl = '${FlutterFlowApiService.baseUrl}/validateProjectYaml';
+      String? usedKey;
+      String? validationError;
+      bool? isValid;
+      int? lastStatus;
+      String? lastBody;
+
+      for (final fileKey in candidateKeys) {
+        // Create request payload
+        final requestBody = json.encode({
+          'projectId': widget.projectId,
+          'fileKey': fileKey,
+          'fileContent': content,
+        });
+
+        debugPrint('Sending validation request to: $apiUrl with key "$fileKey"');
+
+        final response = await http.post(
+          Uri.parse(apiUrl),
+          headers: {
+            'Authorization': 'Bearer $apiToken',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            // Add cache control to prevent caching issues
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+          body: requestBody,
+        );
+
+        debugPrint('Validation response status: ${response.statusCode}');
+        debugPrint('Validation response body: ${response.body}');
+        lastStatus = response.statusCode;
+        lastBody = response.body;
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data['success'] == true) {
+            usedKey = fileKey;
+            isValid = true;
+            validationError = null;
+            break;
+          } else {
+            final errorMsg =
+                (data['error'] ?? data['message'] ?? 'Invalid YAML format')
+                    .toString();
+            isValid = false;
+            validationError = _formatValidationMessage(
               errorMsg,
               yamlContent: content,
               currentFilePath: widget.filePath,
             );
-          });
-        }
-      } else if (response.statusCode == 400) {
-        // Parse detailed validation errors
-        try {
-          final errorData = json.decode(response.body);
-          final combined = [
-            if (errorData['error'] != null) errorData['error'].toString(),
-            if (errorData['message'] != null) errorData['message'].toString(),
-          ].where((e) => e.trim().isNotEmpty).join('\n');
-          setState(() {
-            _isValid = false;
-            _validationError = _formatValidationMessage(
+            break;
+          }
+        } else if (response.statusCode == 400) {
+          // Parse detailed validation errors
+          try {
+            final errorData = json.decode(response.body);
+            final combined = [
+              if (errorData['error'] != null) errorData['error'].toString(),
+              if (errorData['message'] != null)
+                errorData['message'].toString(),
+            ].where((e) => e.trim().isNotEmpty).join('\n');
+            isValid = false;
+            validationError = _formatValidationMessage(
               combined.isEmpty ? response.body : combined,
               yamlContent: content,
               currentFilePath: widget.filePath,
             );
-          });
-        } catch (e) {
-          setState(() {
-            _isValid = false;
-            _validationError = _formatValidationMessage(
+            break;
+          } catch (e) {
+            isValid = false;
+            validationError = _formatValidationMessage(
               'Validation failed (HTTP ${response.statusCode}): ${response.body}',
               yamlContent: content,
               currentFilePath: widget.filePath,
             );
-          });
-        }
-      } else if (response.statusCode == 401) {
-        setState(() {
-          _isValid = false;
-          _validationError =
+            break;
+          }
+        } else if (response.statusCode == 401) {
+          isValid = false;
+          validationError =
               '🔑 Authentication failed. Please check your API token.';
-        });
-      } else if (response.statusCode == 403) {
-        setState(() {
-          _isValid = false;
-          _validationError =
+          break;
+        } else if (response.statusCode == 403) {
+          isValid = false;
+          validationError =
               '🚫 Access denied. Check your API token permissions.';
-        });
-      } else {
-        setState(() {
-          _isValid = false;
-          _validationError =
-              '🌐 Server error (${response.statusCode}). Try again later.';
-        });
+          break;
+        } else {
+          // 5xx: try the next candidate key before giving up
+          isValid = false;
+          validationError =
+              '🌐 Server error (${response.statusCode}). Retrying with an alternate file key...';
+          continue;
+        }
       }
+
+      setState(() {
+        if (usedKey != null && isValid == true) {
+          _isValid = true;
+          _validationError = null;
+          _lastValidatedFileKey = usedKey;
+        } else {
+          _isValid = false;
+          _lastValidatedFileKey = null;
+          _validationError = validationError ??
+              '🌐 Server error${lastStatus != null ? ' ($lastStatus)' : ''}. '
+                  'Tried keys: ${candidateKeys.join(', ')}. '
+                  '${lastBody != null && lastBody!.isNotEmpty ? 'Response: $lastBody' : ''}';
+        }
+      });
     } catch (e) {
       debugPrint('Validation error: $e');
       setState(() {
@@ -293,27 +320,61 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         effectiveFilePath = inferredPath;
       }
 
-      // Convert the file path to the format expected by the API
-      attemptedFileKey = FlutterFlowApiService.getFileKey(effectiveFilePath);
-
-      final inferredFileKey = YamlFileUtils.inferFileKeyFromContent(content);
-      if (inferredFileKey != null && inferredFileKey != attemptedFileKey) {
-        debugPrint(
-            'Overriding derived file key "$attemptedFileKey" with inferred key "$inferredFileKey" based on YAML content.');
-        attemptedFileKey = inferredFileKey;
+      // Build candidate keys (YAML-derived first), preferring a key that already validated.
+      final candidateKeys = FlutterFlowApiService.buildFileKeyCandidates(
+        filePath: effectiveFilePath,
+        yamlContent: content,
+      );
+      if (_lastValidatedFileKey != null &&
+          candidateKeys.contains(_lastValidatedFileKey)) {
+        candidateKeys
+          ..remove(_lastValidatedFileKey)
+          ..insert(0, _lastValidatedFileKey!);
       }
 
-      final fileKeyToContent = {attemptedFileKey!: content};
+      FlutterFlowApiException? lastApiError;
+      bool updated = false;
 
-      print(
-          'Updating file via API: $effectiveFilePath -> key: "$attemptedFileKey"');
+      for (final key in candidateKeys) {
+        attemptedFileKey = key;
+        print('Updating file via API: $effectiveFilePath -> key: "$key"');
 
-      // Call the FlutterFlow API
-      await FlutterFlowApiService.updateProjectYaml(
-        projectId: widget.projectId,
-        apiToken: apiToken,
-        fileKeyToContent: fileKeyToContent,
-      );
+        // Call the FlutterFlow API
+        try {
+          await FlutterFlowApiService.updateProjectYaml(
+            projectId: widget.projectId,
+            apiToken: apiToken,
+            fileKeyToContent: {key: content},
+          );
+          // Success, record key and exit loop
+          _lastValidatedFileKey = key;
+          updated = true;
+          break;
+        } on FlutterFlowApiException catch (apiError) {
+          lastApiError = apiError;
+          // If the API says it's a client error, don't try other keys.
+          if (apiError.statusCode != null &&
+              apiError.statusCode! >= 400 &&
+              apiError.statusCode! < 500) {
+            rethrow;
+          }
+          // Otherwise, try the next candidate key.
+          continue;
+        }
+      }
+
+      if (!updated) {
+        // If we exhausted candidates without success, throw the last API error.
+        if (lastApiError != null) {
+          throw lastApiError;
+        } else {
+          throw FlutterFlowApiException(
+            message:
+                'Update failed: could not find a valid file key for $effectiveFilePath',
+            endpoint: FlutterFlowApiService.baseUrl,
+          );
+        }
+      }
 
       print('Successfully updated file via API: $effectiveFilePath');
 

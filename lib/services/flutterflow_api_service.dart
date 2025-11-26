@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'yaml_file_utils.dart';
 
 class FlutterFlowApiService {
   static const String baseUrl = 'https://api.flutterflow.io/v2';
@@ -221,12 +222,51 @@ class FlutterFlowApiService {
   ///
   /// Returns the file key without extension and archive prefix (e.g., "collections/users")
   static String getFileKey(String fileName) {
-    String fileKey = fileName;
+    final normalized = _normalizeArchivePath(fileName);
+    return _stripYamlExtension(normalized);
+  }
 
-    // Remove the "archive_" prefix if present
-    if (fileKey.startsWith('archive_')) {
-      fileKey = fileKey.substring(8); // Remove "archive_" (8 characters)
+  /// Builds a list of candidate file keys to try with the API.
+  /// This helps when the archive path differs from what the API expects
+  /// (e.g., requiring `.yaml` extension or when the YAML content encodes the key).
+  static List<String> buildFileKeyCandidates({
+    required String filePath,
+    String? yamlContent,
+  }) {
+    final candidates = <String>{};
+
+    // 1) Prefer the key encoded inside the YAML itself.
+    if (yamlContent != null) {
+      final inferred = YamlFileUtils.inferFileKeyFromContent(yamlContent);
+      if (inferred != null && inferred.trim().isNotEmpty) {
+        final normalized = _normalizeArchivePath(inferred.trim());
+        candidates.add(_stripYamlExtension(normalized));
+        candidates.add(_ensureYamlExtension(normalized));
+      }
     }
+
+    // 2) Derive from the file path (without extension).
+    final normalizedPath = _normalizeArchivePath(filePath);
+    final stripped = _stripYamlExtension(normalizedPath);
+    candidates.add(stripped);
+
+    // 3) Some endpoints expect the extension preserved.
+    candidates.add(_ensureYamlExtension(normalizedPath));
+    candidates.add(_ensureYamlExtension(stripped));
+
+    return candidates.where((c) => c.isNotEmpty).toList();
+  }
+
+  static String _normalizeArchivePath(String filePath) {
+    var normalized = filePath.replaceAll('\\', '/');
+    if (normalized.startsWith('archive_')) {
+      normalized = normalized.substring(8);
+    }
+    return normalized.startsWith('/') ? normalized.substring(1) : normalized;
+  }
+
+  static String _stripYamlExtension(String filePath) {
+    String fileKey = filePath;
 
     // Remove common YAML file extensions
     if (fileKey.endsWith('.yaml')) {
@@ -236,6 +276,14 @@ class FlutterFlowApiService {
     }
 
     return fileKey;
+  }
+
+  static String _ensureYamlExtension(String filePath) {
+    final normalized = _normalizeArchivePath(filePath);
+    if (normalized.endsWith('.yaml') || normalized.endsWith('.yml')) {
+      return normalized;
+    }
+    return '$normalized.yaml';
   }
 
   /// Converts a map of file names to content into a map of file keys to content
