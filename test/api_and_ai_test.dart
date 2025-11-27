@@ -83,6 +83,20 @@ page:
       expect(key, 'page/id-Scaffold_example');
     });
 
+    test('does not double-append extension when key already has .yaml', () {
+      const yaml = '''
+page:
+  key: Scaffold_hur6kpbk.yaml
+  name: Example
+''';
+
+      final path = YamlFileUtils.inferFilePathFromContent(yaml);
+      final key = YamlFileUtils.inferFileKeyFromContent(yaml);
+
+      expect(path, 'page/Scaffold_hur6kpbk.yaml');
+      expect(key, 'page/Scaffold_hur6kpbk');
+    });
+
     test('auto-fixes key to match file path, stripping id- prefix', () {
       const yaml = '''
 page:

@@ -28,7 +28,9 @@ class YamlFileUtils {
             final keyValue = value['key'];
             if (keyValue is String && keyValue.trim().isNotEmpty) {
               final sanitizedKey = keyValue.trim();
-              return '$folder/$sanitizedKey.yaml';
+              final hasExtension = sanitizedKey.endsWith('.yaml') || sanitizedKey.endsWith('.yml');
+              final pathKey = hasExtension ? sanitizedKey : '$sanitizedKey.yaml';
+              return '$folder/$pathKey';
             }
           }
         }
@@ -48,6 +50,9 @@ class YamlFileUtils {
     if (filePath == null) return null;
     if (filePath.endsWith('.yaml')) {
       return filePath.substring(0, filePath.length - 5);
+    }
+    if (filePath.endsWith('.yml')) {
+      return filePath.substring(0, filePath.length - 4);
     }
     return filePath;
   }
