@@ -175,6 +175,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       int? lastStatus;
       String? lastBody;
       List<String>? lastErrors;
+      String? lastKeyAttempt;
 
       for (final fileKey in candidateKeys) {
         // Create request payload
@@ -203,6 +204,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         debugPrint('Validation response body: ${response.body}');
         lastStatus = response.statusCode;
         lastBody = response.body;
+        lastKeyAttempt = fileKey;
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
@@ -270,8 +272,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         } else {
           // 5xx: try the next candidate key before giving up
           isValid = false;
-          validationError =
-              '🌐 Server error (${response.statusCode}). Retrying with an alternate file key...';
+          validationError = null;
           continue;
         }
       }
@@ -288,9 +289,13 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
               lastErrors != null && lastErrors!.isNotEmpty ? lastErrors!.join('\n') : null;
           _validationError = validationError ??
               errorsText ??
-              '🌐 Server error${lastStatus != null ? ' ($lastStatus)' : ''}. '
-                  'Tried keys: ${candidateKeys.join(', ')}. '
-                  '${lastBody != null && lastBody!.isNotEmpty ? 'Response: $lastBody' : ''}';
+              [
+                '🌐 Server error${lastStatus != null ? ' ($lastStatus)' : ''}.',
+                if (lastKeyAttempt != null) 'Last key tried: $lastKeyAttempt',
+                if (candidateKeys.isNotEmpty) 'Tried keys: ${candidateKeys.join(', ')}',
+                if (lastBody != null && lastBody!.isNotEmpty)
+                  'Response: $lastBody',
+              ].where((e) => e != null && e.toString().trim().isNotEmpty).join(' ');
         }
       });
     } catch (e) {
