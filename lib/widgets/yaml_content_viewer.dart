@@ -37,7 +37,7 @@ class YamlContentViewer extends StatefulWidget {
     this.isReadOnly = true,
     this.onContentChanged,
     this.onFileUpdated,
-      this.onFileRenamed,
+    this.onFileRenamed,
     this.filePath = '',
     this.projectId = '',
     this.hasPendingLocalEdits = false,
@@ -51,6 +51,9 @@ class YamlContentViewer extends StatefulWidget {
 
 class _YamlContentViewerState extends State<YamlContentViewer> {
   late TextEditingController _textController;
+  late TextEditingController _findController;
+  late TextEditingController _replaceController;
+  final FocusNode _editorFocusNode = FocusNode();
   bool _isEditing = false;
   bool _isCopied = false;
   bool _isValidating = false;
@@ -69,6 +72,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   void initState() {
     super.initState();
     _textController = TextEditingController(text: widget.content ?? '');
+    _findController = TextEditingController();
+    _replaceController = TextEditingController();
     // Listen for changes to track unsaved changes
     _textController.addListener(_onTextChanged);
     // If we have pending local edits, surface edit mode immediately
@@ -96,6 +101,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       setState(() {
         _isEditing = widget.startInEditMode;
         _lastValidatedFileKey = null;
+        _findController.clear();
+        _replaceController.clear();
       });
     }
   }
@@ -104,6 +111,9 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   void dispose() {
     _textController.removeListener(_onTextChanged);
     _textController.dispose();
+    _findController.dispose();
+    _replaceController.dispose();
+    _editorFocusNode.dispose();
     _errorVController.dispose();
     _errorHController.dispose();
     _viewerVController.dispose();
@@ -151,7 +161,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       }
 
       // Auto-fix YAML key based on file path before sending.
-      final fixed = YamlFileUtils.ensureKeyMatchesFile(content, widget.filePath);
+      final fixed =
+          YamlFileUtils.ensureKeyMatchesFile(content, widget.filePath);
       if (fixed.changed) {
         content = fixed.content;
         _textController.text = content;
@@ -185,7 +196,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           'fileContent': content,
         });
 
-        debugPrint('Sending validation request to: $apiUrl with key "$fileKey"');
+        debugPrint(
+            'Sending validation request to: $apiUrl with key "$fileKey"');
 
         final response = await http.post(
           Uri.parse(apiUrl),
@@ -285,17 +297,21 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         } else {
           _isValid = false;
           _lastValidatedFileKey = null;
-          final errorsText =
-              lastErrors != null && lastErrors!.isNotEmpty ? lastErrors!.join('\n') : null;
+          final errorsText = lastErrors != null && lastErrors!.isNotEmpty
+              ? lastErrors!.join('\n')
+              : null;
           _validationError = validationError ??
               errorsText ??
               [
                 '🌐 Server error${lastStatus != null ? ' ($lastStatus)' : ''}.',
                 if (lastKeyAttempt != null) 'Last key tried: $lastKeyAttempt',
-                if (candidateKeys.isNotEmpty) 'Tried keys: ${candidateKeys.join(', ')}',
+                if (candidateKeys.isNotEmpty)
+                  'Tried keys: ${candidateKeys.join(', ')}',
                 if (lastBody != null && lastBody!.isNotEmpty)
                   'Response: $lastBody',
-              ].where((e) => e != null && e.toString().trim().isNotEmpty).join(' ');
+              ]
+                  .where((e) => e != null && e.toString().trim().isNotEmpty)
+                  .join(' ');
         }
       });
     } catch (e) {
@@ -348,7 +364,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       }
 
       // Auto-fix YAML key based on file path before upload.
-      final fixed = YamlFileUtils.ensureKeyMatchesFile(content, effectiveFilePath);
+      final fixed =
+          YamlFileUtils.ensureKeyMatchesFile(content, effectiveFilePath);
       if (fixed.changed) {
         content = fixed.content;
         _textController.text = content;
@@ -634,6 +651,138 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     });
   }
 
+  void _showSearchMessage(String message) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger != null) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+    } else {
+      debugPrint(message);
+    }
+  }
+
+  void _handleFindNext() {
+    final query = _findController.text;
+    if (query.isEmpty) {
+      _showSearchMessage('Enter text to find.');
+      return;
+    }
+
+    final content = _textController.text;
+    if (content.isEmpty) {
+      _showSearchMessage('No YAML content loaded.');
+      return;
+    }
+
+    final startIndex =
+        _textController.selection.isValid ? _textController.selection.end : 0;
+    final matchIndex = _findNextIndex(content, query, startIndex);
+
+    if (matchIndex == -1) {
+      _showSearchMessage('No matches for "$query".');
+      return;
+    }
+
+    _selectMatch(matchIndex, query.length);
+  }
+
+  void _handleReplaceCurrent() {
+    final query = _findController.text;
+    if (query.isEmpty) {
+      _showSearchMessage('Enter text to find.');
+      return;
+    }
+
+    final content = _textController.text;
+    if (content.isEmpty) {
+      _showSearchMessage('No YAML content loaded.');
+      return;
+    }
+
+    final selection = _textController.selection;
+    final hasSelection = selection.isValid &&
+        selection.start >= 0 &&
+        selection.end <= content.length &&
+        selection.start != selection.end;
+    final selectionMatches = hasSelection &&
+        content.substring(selection.start, selection.end) == query;
+
+    if (!selectionMatches) {
+      _handleFindNext();
+      return;
+    }
+
+    final replacement = _replaceController.text;
+    final newText =
+        content.replaceRange(selection.start, selection.end, replacement);
+    final newCaret = selection.start + replacement.length;
+
+    _textController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newCaret),
+    );
+    _editorFocusNode.requestFocus();
+
+    _showSearchMessage('Replaced 1 occurrence.');
+    _handleFindNext();
+  }
+
+  void _handleReplaceAll() {
+    final query = _findController.text;
+    if (query.isEmpty) {
+      _showSearchMessage('Enter text to find.');
+      return;
+    }
+
+    final content = _textController.text;
+    if (content.isEmpty) {
+      _showSearchMessage('No YAML content loaded.');
+      return;
+    }
+
+    final matches = RegExp(RegExp.escape(query)).allMatches(content).toList();
+    if (matches.isEmpty) {
+      _showSearchMessage('No matches for "$query".');
+      return;
+    }
+
+    final replacement = _replaceController.text;
+    final newText = content.replaceAll(query, replacement);
+
+    _textController.value = TextEditingValue(
+      text: newText,
+      selection: const TextSelection.collapsed(offset: 0),
+    );
+    _editorFocusNode.requestFocus();
+
+    final count = matches.length;
+    _showSearchMessage(
+        'Replaced $count ${count == 1 ? 'occurrence' : 'occurrences'}.');
+  }
+
+  int _findNextIndex(String text, String query, int startIndex) {
+    final safeStart =
+        startIndex.clamp(0, text.isEmpty ? 0 : text.length).toInt();
+    final forwardMatch = text.indexOf(query, safeStart);
+    if (forwardMatch != -1) return forwardMatch;
+    if (safeStart == 0) return -1;
+    return text.indexOf(query);
+  }
+
+  void _selectMatch(int start, int length) {
+    final end = (start + length).clamp(0, _textController.text.length);
+    _textController.value = _textController.value.copyWith(
+      selection: TextSelection(baseOffset: start, extentOffset: end),
+    );
+    _editorFocusNode.requestFocus();
+  }
+
   // Discard changes and exit edit mode
   void _discardChanges() {
     // If we only have pending local edits (no manual typing), let parent
@@ -725,8 +874,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                             decoration: BoxDecoration(
                               color: AppTheme.backgroundColor,
                               borderRadius: BorderRadius.circular(6),
-                              border:
-                                  Border.all(color: AppTheme.dividerColor),
+                              border: Border.all(color: AppTheme.dividerColor),
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(6),
@@ -894,6 +1042,11 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                 ),
               ],
             ),
+          if (!widget.isReadOnly && _isEditing)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: _buildFindReplaceBar(),
+            ),
         ],
       ),
     );
@@ -932,6 +1085,120 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
                   color: effectiveColor,
                   fontWeight: FontWeight.w600,
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFindReplaceBar() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _buildFindReplaceField(
+          controller: _findController,
+          label: 'Find',
+          hint: 'Search within file',
+          icon: Icons.search,
+          onSubmitted: (_) => _handleFindNext(),
+        ),
+        _buildFindReplaceField(
+          controller: _replaceController,
+          label: 'Replace',
+          hint: 'Replacement text',
+          icon: Icons.find_replace,
+          onSubmitted: (_) => _handleReplaceCurrent(),
+        ),
+        _buildFindReplaceButton(
+          icon: Icons.search,
+          label: 'Find next',
+          onPressed: _handleFindNext,
+        ),
+        _buildFindReplaceButton(
+          icon: Icons.swap_horiz,
+          label: 'Replace',
+          onPressed: _handleReplaceCurrent,
+        ),
+        _buildFindReplaceButton(
+          icon: Icons.auto_fix_high,
+          label: 'Replace all',
+          onPressed: _handleReplaceAll,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFindReplaceField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    void Function(String)? onSubmitted,
+  }) {
+    return SizedBox(
+      width: 220,
+      child: TextField(
+        controller: controller,
+        style: AppTheme.bodyMedium.copyWith(color: AppTheme.textPrimary),
+        onSubmitted: onSubmitted,
+        decoration: InputDecoration(
+          isDense: true,
+          labelText: label,
+          hintText: hint,
+          prefixIcon: Icon(icon, size: 16, color: AppTheme.textSecondary),
+          filled: true,
+          fillColor: AppTheme.backgroundColor,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(6),
+            borderSide: BorderSide(color: AppTheme.dividerColor),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(6),
+            borderSide: BorderSide(color: AppTheme.dividerColor),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(6),
+            borderSide: BorderSide(color: AppTheme.primaryColor, width: 2),
+          ),
+          hintStyle: AppTheme.bodySmall,
+          labelStyle: AppTheme.captionLarge,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFindReplaceButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: AppTheme.primaryColor.withOpacity(0.35)),
+            color: AppTheme.surfaceColor,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: AppTheme.primaryColor),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style:
+                    AppTheme.captionLarge.copyWith(color: AppTheme.textPrimary),
               ),
             ],
           ),
@@ -997,6 +1264,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       color: AppTheme.backgroundColor,
       child: TextField(
         controller: _textController,
+        focusNode: _editorFocusNode,
         style: AppTheme.monospace.copyWith(
           color: AppTheme.textPrimary, // Use theme's white text
         ),
@@ -1149,7 +1417,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   }
 
   String? _buildFixHint(String detail, String? location) {
-    final target = (location == null || location.isEmpty) ? 'this file' : location;
+    final target =
+        (location == null || location.isEmpty) ? 'this file' : location;
 
     final unknownFieldMatch =
         RegExp(r"Unknown field name '([^']+)'", caseSensitive: false)
@@ -1201,9 +1470,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       return lines.take(5).join('\n');
     }
     final start = targetIndex - 2 < 0 ? 0 : targetIndex - 2;
-    final endExclusive = (targetIndex + 3) >= lines.length
-        ? lines.length
-        : targetIndex + 3;
+    final endExclusive =
+        (targetIndex + 3) >= lines.length ? lines.length : targetIndex + 3;
     final buffer = StringBuffer();
 
     for (var i = start; i < endExclusive; i++) {
@@ -1212,9 +1480,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       if (i == targetIndex) {
         final lineLength = lines[i].length;
         final effectiveColumn = column.clamp(1, lineLength + 1).toInt();
-        final caretPosition = effectiveColumn <= 1
-            ? ''
-            : ' ' * (effectiveColumn - 1);
+        final caretPosition =
+            effectiveColumn <= 1 ? '' : ' ' * (effectiveColumn - 1);
         buffer.writeln('     | ${caretPosition}^');
       }
     }
@@ -1233,7 +1500,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       final value = raw?.trim();
       if (value == null || value.isEmpty) continue;
 
-      final match = RegExp(r'Failed to update project:\s*([^\n]+)').firstMatch(value);
+      final match =
+          RegExp(r'Failed to update project:\s*([^\n]+)').firstMatch(value);
       if (match != null) {
         return match.group(1)?.trim();
       }
