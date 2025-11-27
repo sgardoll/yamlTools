@@ -110,8 +110,8 @@ page:
       );
 
       expect(result.changed, isTrue);
-      expect(result.expectedKey, 'Scaffold_fixed.yaml');
-      expect(result.content.contains('key: Scaffold_fixed.yaml'), isTrue);
+      expect(result.expectedKey, 'Scaffold_fixed');
+      expect(result.content.contains('key: Scaffold_fixed'), isTrue);
     });
   });
 

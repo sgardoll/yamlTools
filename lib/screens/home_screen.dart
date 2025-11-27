@@ -465,30 +465,38 @@ class _HomeScreenState extends State<HomeScreen> {
   // Apply changes to a file and update modification tracking
   Future<void> _applyFileChanges(String fileName, String newContent,
       {bool validated = false, String? messageOverride}) async {
-    final contentChanged = _exportedFiles[fileName] != newContent;
+    final sanitizedName = _normalizeFilePath(fileName);
+    String effectiveName = sanitizedName;
+
+    // If the sanitized name differs, move state over to avoid duplicate entries.
+    if (sanitizedName != fileName) {
+      effectiveName = _renameFileAcrossState(fileName, sanitizedName);
+    }
+
+    final contentChanged = _exportedFiles[effectiveName] != newContent;
 
     setState(() {
       if (contentChanged) {
         // If this is first modification and the file existed before, backup the original
-        if (!_originalFiles.containsKey(fileName) &&
-            _exportedFiles.containsKey(fileName)) {
-          _originalFiles[fileName] = _exportedFiles[fileName]!;
+        if (!_originalFiles.containsKey(effectiveName) &&
+            _exportedFiles.containsKey(effectiveName)) {
+          _originalFiles[effectiveName] = _exportedFiles[effectiveName]!;
         }
 
         // Update file content
-        _exportedFiles[fileName] = newContent;
-        _changedFiles[fileName] = newContent;
+        _exportedFiles[effectiveName] = newContent;
+        _changedFiles[effectiveName] = newContent;
         _hasModifications = true;
 
         // Always track local update timestamp when file content changes
-        _fileUpdateTimestamps[fileName] = DateTime.now();
+        _fileUpdateTimestamps[effectiveName] = DateTime.now();
 
         // Update the message to indicate a manual edit was made
         if (messageOverride != null && messageOverride.isNotEmpty) {
           _operationMessage = messageOverride;
           _generatedYamlMessage = messageOverride;
         } else {
-          _operationMessage = 'File "$fileName" manually edited.';
+          _operationMessage = 'File "$effectiveName" manually edited.';
           _generatedYamlMessage =
               '$_operationMessage\n\nThe file has been updated.';
         }
@@ -496,10 +504,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Track validation timestamp when explicitly validated
       if (validated) {
-        _fileValidationTimestamps[fileName] = DateTime.now();
+        _fileValidationTimestamps[effectiveName] = DateTime.now();
         if (!contentChanged &&
             (messageOverride == null || messageOverride.isEmpty)) {
-          _operationMessage = 'File "$fileName" validated.';
+          _operationMessage = 'File "$effectiveName" validated.';
           _generatedYamlMessage = '$_operationMessage\n\nValidation passed.';
         }
       }
@@ -1752,14 +1760,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _normalizeFilePath(String path) {
     final trimmed = path.trim();
-    if (trimmed.isEmpty) {
+    final deduped = _dedupeYamlExtension(trimmed);
+    if (deduped.isEmpty) {
       return 'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
     }
-    return trimmed.endsWith('.yaml') ? trimmed : '$trimmed.yaml';
+    return deduped.endsWith('.yaml') ? deduped : '$deduped.yaml';
   }
 
   String _ensureUniqueFilePath(String desiredPath, {String? excludePath}) {
     String candidate = _normalizeFilePath(desiredPath);
+    candidate = _dedupeYamlExtension(candidate);
     if (!_exportedFiles.containsKey(candidate) || candidate == excludePath) {
       return candidate;
     }
@@ -1775,6 +1785,11 @@ class _HomeScreenState extends State<HomeScreen> {
     } while (_exportedFiles.containsKey(attempt) && attempt != excludePath);
 
     return attempt;
+  }
+
+  String _dedupeYamlExtension(String path) {
+    // Collapse repeated ".yaml" suffixes into a single ".yaml"
+    return path.replaceFirst(RegExp(r'(\\.yaml)+$'), '.yaml');
   }
 
   String _renameFileAcrossState(String oldPath, String desiredNewPath) {

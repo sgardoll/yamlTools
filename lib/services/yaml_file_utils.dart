@@ -58,7 +58,7 @@ class YamlFileUtils {
   }
 
   /// Ensures the YAML "key" field matches the expected value derived
-  /// from the file path (e.g., archive_page/id-Scaffold_x.yaml -> Scaffold_x.yaml).
+  /// from the file path (e.g., archive_page/id-Scaffold_x.yaml -> Scaffold_x).
   /// Returns a [KeyFixResult] indicating whether a change was applied.
   static KeyFixResult ensureKeyMatchesFile(String yamlContent, String filePath) {
     final expectedKey = _expectedKeyValueFromFilePath(filePath);
@@ -126,8 +126,8 @@ class YamlFileUtils {
   }
 
   /// Derives the expected YAML key value from a file path by
-  /// removing any archive_ prefix, keeping the basename, and
-  /// stripping a leading "id-" if present.
+  /// removing any archive_ prefix, dropping the extension,
+  /// keeping the basename, and stripping a leading "id-" if present.
   static String? _expectedKeyValueFromFilePath(String filePath) {
     var normalized = filePath.replaceAll('\\', '/');
     if (normalized.startsWith('archive_')) {
@@ -141,6 +141,12 @@ class YamlFileUtils {
     if (parts.isEmpty) return null;
     var base = parts.last;
     if (base.isEmpty) return null;
+
+    if (base.endsWith('.yaml')) {
+      base = base.substring(0, base.length - 5);
+    } else if (base.endsWith('.yml')) {
+      base = base.substring(0, base.length - 4);
+    }
 
     if (base.startsWith('id-') && base.length > 3) {
       base = base.substring(3);
