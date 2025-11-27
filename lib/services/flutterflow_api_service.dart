@@ -233,28 +233,43 @@ class FlutterFlowApiService {
     required String filePath,
     String? yamlContent,
   }) {
-    final candidates = <String>{};
+    final added = <String>{};
+    final candidates = <String>[];
+
+    void add(String raw) {
+      final normalized = _normalizeArchivePath(raw);
+      if (normalized.isEmpty) return;
+      if (added.add(normalized)) {
+        candidates.add(normalized);
+      }
+    }
+
+    final normalizedPath = _normalizeArchivePath(filePath);
+    final strippedPath = _stripYamlExtension(normalizedPath);
+    final pathHasExtension = normalizedPath != strippedPath;
+
+    // 1) Prefer the exact path with extension when present.
+    if (pathHasExtension) {
+      add(_ensureYamlExtension(normalizedPath));
+    }
+
+    // 2) Path without extension.
+    add(strippedPath);
+
+    // 3) Path with ensured extension (covers cases where original lacked it).
+    add(_ensureYamlExtension(strippedPath));
 
     // 1) Prefer the key encoded inside the YAML itself.
     if (yamlContent != null) {
       final inferred = YamlFileUtils.inferFileKeyFromContent(yamlContent);
       if (inferred != null && inferred.trim().isNotEmpty) {
         final normalized = _normalizeArchivePath(inferred.trim());
-        candidates.add(_stripYamlExtension(normalized));
-        candidates.add(_ensureYamlExtension(normalized));
+        add(_ensureYamlExtension(normalized));
+        add(_stripYamlExtension(normalized));
       }
     }
 
-    // 2) Derive from the file path (without extension).
-    final normalizedPath = _normalizeArchivePath(filePath);
-    final stripped = _stripYamlExtension(normalizedPath);
-    candidates.add(stripped);
-
-    // 3) Some endpoints expect the extension preserved.
-    candidates.add(_ensureYamlExtension(normalizedPath));
-    candidates.add(_ensureYamlExtension(stripped));
-
-    return candidates.where((c) => c.isNotEmpty).toList();
+    return candidates;
   }
 
   static String _normalizeArchivePath(String filePath) {

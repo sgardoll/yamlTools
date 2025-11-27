@@ -199,35 +199,24 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           final data = json.decode(response.body);
           final validationErrors = _extractValidationErrors(data);
           lastErrors = validationErrors;
-          final hasKeyMismatchOnly = validationErrors.isNotEmpty &&
-              validationErrors.every(_looksLikeKeyMismatchError);
-
           if (data['success'] == true && validationErrors.isEmpty) {
             usedKey = fileKey;
-            isValid = true;
-            validationError = null;
-            break;
-          } else if (hasKeyMismatchOnly) {
-            // Treat as recoverable: prefer a non-extension key for upload.
-            final preferred = _preferredNonExtensionCandidate(candidateKeys);
-            usedKey = preferred ?? fileKey;
-            _lastValidatedFileKey = usedKey;
             isValid = true;
             validationError = null;
             break;
           } else {
             final errorMsg = validationErrors.isNotEmpty
                 ? validationErrors.join('\n')
-                : (data['error'] ??
-                        data['message'] ??
-                        'Invalid YAML format')
+                : (data['error'] ?? data['message'] ?? 'Invalid YAML format')
                     .toString();
+            final keyMismatch = _firstKeyMismatch(validationErrors);
             isValid = false;
-            validationError = _formatValidationMessage(
-              errorMsg,
-              yamlContent: content,
-              currentFilePath: widget.filePath,
-            );
+            validationError = keyMismatch ??
+                _formatValidationMessage(
+                  errorMsg,
+                  yamlContent: content,
+                  currentFilePath: widget.filePath,
+                );
             break;
           }
         } else if (response.statusCode == 400) {
@@ -242,11 +231,13 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
               if (extracted.isNotEmpty) extracted.join('\n'),
             ].where((e) => e.trim().isNotEmpty).join('\n');
             isValid = false;
-            validationError = _formatValidationMessage(
-              combined.isEmpty ? response.body : combined,
-              yamlContent: content,
-              currentFilePath: widget.filePath,
-            );
+            final keyMismatch = _firstKeyMismatch(extracted);
+            validationError = keyMismatch ??
+                _formatValidationMessage(
+                  combined.isEmpty ? response.body : combined,
+                  yamlContent: content,
+                  currentFilePath: widget.filePath,
+                );
             break;
           } catch (e) {
             isValid = false;
@@ -1153,6 +1144,17 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       return '🔧 Fix: Add the required "$field" field to $target. Copy the default structure from FlutterFlow or another working file to ensure all mandatory fields are present.';
     }
 
+    if (_looksLikeKeyMismatchError(detail)) {
+      final match = RegExp(r'Cannot change the key "([^"]+)" to "([^"]+)"')
+          .firstMatch(detail);
+      final fromKey = match?.group(1);
+      final toKey = match?.group(2);
+      if (fromKey != null && toKey != null) {
+        return '🔧 Fix: FlutterFlow requires the YAML "key" field to stay "$fromKey". Update the file so its "key" value matches "$fromKey" (not "$toKey"), then try again.';
+      }
+      return '🔧 Fix: FlutterFlow requires the YAML "key" field to remain unchanged. Revert the "key" value to the one from your export and try again.';
+    }
+
     if (detail.toLowerCase().contains('duplicate key')) {
       return '🔧 Fix: Remove one of the duplicate keys in $target. YAML files must only declare each key once at the same indentation level.';
     }
@@ -1246,6 +1248,22 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     for (final c in candidates) {
       if (!c.endsWith('.yaml') && !c.endsWith('.yml')) {
         return c;
+      }
+    }
+    return null;
+  }
+
+  String? _firstKeyMismatch(List<String> messages) {
+    for (final m in messages) {
+      if (_looksLikeKeyMismatchError(m)) {
+        final match = RegExp(r'Cannot change the key "([^"]+)" to "([^"]+)"')
+            .firstMatch(m);
+        final fromKey = match?.group(1);
+        final toKey = match?.group(2);
+        if (fromKey != null && toKey != null) {
+          return '❌ YAML Validation Failed\n• Key mismatch: expected "$fromKey" but received "$toKey".\n🔧 Fix: Set the YAML "key" field to "$fromKey" and try again.';
+        }
+        return '❌ YAML Validation Failed\n• Key mismatch detected. Please revert the YAML "key" field to the value from your export and try again.';
       }
     }
     return null;
