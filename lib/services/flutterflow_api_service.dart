@@ -277,6 +277,8 @@ class FlutterFlowApiService {
     if (normalized.startsWith('archive_')) {
       normalized = normalized.substring(8);
     }
+    // Collapse repeated extensions
+    normalized = normalized.replaceFirst(RegExp(r'(\\.ya?ml)+$', caseSensitive: false), '.yaml');
     return normalized.startsWith('/') ? normalized.substring(1) : normalized;
   }
 

@@ -1584,6 +1584,9 @@ class _HomeScreenState extends State<HomeScreen> {
     print(
         "Original files: ${_originalFiles.length}, Export files: ${_exportedFiles.length}, Changed files: ${_changedFiles.length}");
 
+    // Deduplicate any malformed paths (e.g., ".yaml.yaml") across state.
+    _canonicalizeAllFileState();
+
     // Auto-expand important files after they're loaded
     _autoExpandImportantFiles();
   }
@@ -1759,17 +1762,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String _normalizeFilePath(String path) {
-    final trimmed = path.trim();
-    final deduped = _dedupeYamlExtension(trimmed);
-    if (deduped.isEmpty) {
+    final normalized = YamlFileUtils.normalizeFilePath(path).canonicalPath;
+    if (normalized.isEmpty) {
       return 'ai_generated_${DateTime.now().millisecondsSinceEpoch}.yaml';
     }
-    return deduped.endsWith('.yaml') ? deduped : '$deduped.yaml';
+    return normalized;
   }
 
   String _ensureUniqueFilePath(String desiredPath, {String? excludePath}) {
     String candidate = _normalizeFilePath(desiredPath);
-    candidate = _dedupeYamlExtension(candidate);
     if (!_exportedFiles.containsKey(candidate) || candidate == excludePath) {
       return candidate;
     }
@@ -1785,11 +1786,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } while (_exportedFiles.containsKey(attempt) && attempt != excludePath);
 
     return attempt;
-  }
-
-  String _dedupeYamlExtension(String path) {
-    // Collapse repeated ".yaml" suffixes into a single ".yaml"
-    return path.replaceFirst(RegExp(r'(\\.yaml)+$'), '.yaml');
   }
 
   String _renameFileAcrossState(String oldPath, String desiredNewPath) {
@@ -1824,6 +1820,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return newPath;
+  }
+
+  void _canonicalizeAllFileState() {
+    final currentKeys = List<String>.from(_exportedFiles.keys);
+    for (final oldKey in currentKeys) {
+      final canonical = _normalizeFilePath(oldKey);
+      if (canonical == oldKey) continue;
+      _renameFileAcrossState(oldKey, canonical);
+    }
   }
 
   void _handleFileRenamed(String oldPath, String newPath) {

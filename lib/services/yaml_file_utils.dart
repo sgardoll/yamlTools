@@ -61,7 +61,7 @@ class YamlFileUtils {
   /// from the file path (e.g., archive_page/id-Scaffold_x.yaml -> Scaffold_x).
   /// Returns a [KeyFixResult] indicating whether a change was applied.
   static KeyFixResult ensureKeyMatchesFile(String yamlContent, String filePath) {
-    final expectedKey = _expectedKeyValueFromFilePath(filePath);
+    final expectedKey = normalizeFilePath(filePath).expectedYamlKey;
     if (expectedKey == null || expectedKey.isEmpty) {
       return KeyFixResult(
         content: yamlContent,
@@ -125,33 +125,48 @@ class YamlFileUtils {
     );
   }
 
-  /// Derives the expected YAML key value from a file path by
-  /// removing any archive_ prefix, dropping the extension,
-  /// keeping the basename, and stripping a leading "id-" if present.
-  static String? _expectedKeyValueFromFilePath(String filePath) {
-    var normalized = filePath.replaceAll('\\', '/');
-    if (normalized.startsWith('archive_')) {
-      normalized = normalized.substring(8);
+  /// Normalizes a file path for state/APIs and derives related keys.
+  ///
+  /// - Removes leading "archive_" prefix (once)
+  /// - Converts backslashes to slashes
+  /// - Removes duplicate ".yaml"/".yml" suffixes, ensures a single ".yaml"
+  /// - Removes a leading slash
+  ///
+  /// Returns [NormalizedPath] containing:
+  /// - canonicalPath: normalized path with one ".yaml"
+  /// - apiFileKey: canonical path without extension
+  /// - expectedYamlKey: basename without extension, leading "id-" stripped
+  static NormalizedPath normalizeFilePath(String rawPath) {
+    String path = rawPath.trim();
+    path = path.replaceAll('\\', '/');
+    if (path.startsWith('/')) {
+      path = path.substring(1);
     }
-    if (normalized.startsWith('/')) {
-      normalized = normalized.substring(1);
-    }
-
-    final parts = normalized.split('/');
-    if (parts.isEmpty) return null;
-    var base = parts.last;
-    if (base.isEmpty) return null;
-
-    if (base.endsWith('.yaml')) {
-      base = base.substring(0, base.length - 5);
-    } else if (base.endsWith('.yml')) {
-      base = base.substring(0, base.length - 4);
+    if (path.startsWith('archive_')) {
+      path = path.substring(8);
     }
 
-    if (base.startsWith('id-') && base.length > 3) {
-      base = base.substring(3);
+    // Ensure only one extension at the end
+    path = path.replaceFirst(RegExp(r'(\\.ya?ml)+$', caseSensitive: false), '.yaml');
+    if (!path.toLowerCase().endsWith('.yaml')) {
+      path = '$path.yaml';
     }
-    return base;
+
+    final apiFileKey = path.substring(0, path.length - 5);
+    final parts = path.split('/');
+    final baseName = parts.isNotEmpty ? parts.last : path;
+    var expectedKey = baseName.endsWith('.yaml')
+        ? baseName.substring(0, baseName.length - 5)
+        : baseName;
+    if (expectedKey.startsWith('id-') && expectedKey.length > 3) {
+      expectedKey = expectedKey.substring(3);
+    }
+
+    return NormalizedPath(
+      canonicalPath: path,
+      apiFileKey: apiFileKey,
+      expectedYamlKey: expectedKey,
+    );
   }
 
   static String? _folderForSection(String sectionKey) {
@@ -181,5 +196,31 @@ class KeyFixResult {
     required this.changed,
     this.expectedKey,
     this.previousKey,
+  });
+
+  KeyFixResult copyWith({
+    String? content,
+    bool? changed,
+    String? expectedKey,
+    String? previousKey,
+  }) {
+    return KeyFixResult(
+      content: content ?? this.content,
+      changed: changed ?? this.changed,
+      expectedKey: expectedKey ?? this.expectedKey,
+      previousKey: previousKey ?? this.previousKey,
+    );
+  }
+}
+
+class NormalizedPath {
+  final String canonicalPath;
+  final String apiFileKey;
+  final String expectedYamlKey;
+
+  const NormalizedPath({
+    required this.canonicalPath,
+    required this.apiFileKey,
+    required this.expectedYamlKey,
   });
 }
