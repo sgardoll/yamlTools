@@ -150,6 +150,15 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         return;
       }
 
+      // Auto-fix YAML key based on file path before sending.
+      final fixed = YamlFileUtils.ensureKeyMatchesFile(content, widget.filePath);
+      if (fixed.changed) {
+        content = fixed.content;
+        _textController.text = content;
+        debugPrint(
+            'Auto-corrected YAML key from "${fixed.previousKey}" to "${fixed.expectedKey}" for ${widget.filePath}');
+      }
+
       // Extract file key from the file path using the same method as update
       final candidateKeys = FlutterFlowApiService.buildFileKeyCandidates(
         filePath: widget.filePath,
@@ -331,6 +340,15 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             'Detected mismatch between file path and YAML key. Renaming "${widget.filePath}" -> "$inferredPath" before upload.');
         widget.onFileRenamed?.call(widget.filePath, inferredPath);
         effectiveFilePath = inferredPath;
+      }
+
+      // Auto-fix YAML key based on file path before upload.
+      final fixed = YamlFileUtils.ensureKeyMatchesFile(content, effectiveFilePath);
+      if (fixed.changed) {
+        content = fixed.content;
+        _textController.text = content;
+        debugPrint(
+            'Auto-corrected YAML key from "${fixed.previousKey}" to "${fixed.expectedKey}" for $effectiveFilePath');
       }
 
       // Build candidate keys (YAML-derived first), preferring a key that already validated.

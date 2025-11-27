@@ -52,6 +52,97 @@ class YamlFileUtils {
     return filePath;
   }
 
+  /// Ensures the YAML "key" field matches the expected value derived
+  /// from the file path (e.g., archive_page/id-Scaffold_x.yaml -> Scaffold_x.yaml).
+  /// Returns a [KeyFixResult] indicating whether a change was applied.
+  static KeyFixResult ensureKeyMatchesFile(String yamlContent, String filePath) {
+    final expectedKey = _expectedKeyValueFromFilePath(filePath);
+    if (expectedKey == null || expectedKey.isEmpty) {
+      return KeyFixResult(
+        content: yamlContent,
+        changed: false,
+        expectedKey: null,
+        previousKey: null,
+      );
+    }
+
+    try {
+      final root = loadYaml(yamlContent);
+      if (root is! YamlMap || root.isEmpty) {
+        return KeyFixResult(
+          content: yamlContent,
+          changed: false,
+          expectedKey: expectedKey,
+          previousKey: null,
+        );
+      }
+
+      for (final entry in root.entries) {
+        final value = entry.value;
+        if (value is YamlMap && value.containsKey('key')) {
+          final currentKey = value['key']?.toString();
+          if (currentKey == expectedKey) {
+            return KeyFixResult(
+              content: yamlContent,
+              changed: false,
+              expectedKey: expectedKey,
+              previousKey: currentKey,
+            );
+          }
+
+          // Replace the first "key:" line while preserving indentation.
+          final keyLine = RegExp(r'^(\s*)key\s*:\s*.*$', multiLine: true);
+          final match = keyLine.firstMatch(yamlContent);
+          if (match != null) {
+            final indent = match.group(1) ?? '';
+            final updated = yamlContent.replaceFirst(
+              keyLine,
+              '$indent' 'key: $expectedKey',
+            );
+            return KeyFixResult(
+              content: updated,
+              changed: true,
+              expectedKey: expectedKey,
+              previousKey: currentKey,
+            );
+          }
+        }
+      }
+    } catch (error) {
+      debugPrint('Failed to auto-fix YAML key for $filePath: $error');
+    }
+
+    return KeyFixResult(
+      content: yamlContent,
+      changed: false,
+      expectedKey: expectedKey,
+      previousKey: null,
+    );
+  }
+
+  /// Derives the expected YAML key value from a file path by
+  /// removing any archive_ prefix, keeping the basename, and
+  /// stripping a leading "id-" if present.
+  static String? _expectedKeyValueFromFilePath(String filePath) {
+    var normalized = filePath.replaceAll('\\', '/');
+    if (normalized.startsWith('archive_')) {
+      normalized = normalized.substring(8);
+    }
+    if (normalized.startsWith('/')) {
+      normalized = normalized.substring(1);
+    }
+
+    final parts = normalized.split('/');
+    if (parts.isEmpty) return null;
+    var base = parts.last;
+    if (base.isEmpty) return null;
+
+    if (base.startsWith('id-') && base.length > 3) {
+      base = base.substring(3);
+    }
+    return base;
+  }
+
   static String? _folderForSection(String sectionKey) {
     switch (sectionKey) {
       case 'page':
@@ -66,4 +157,18 @@ class YamlFileUtils {
         return null;
     }
   }
+}
+
+class KeyFixResult {
+  final String content;
+  final bool changed;
+  final String? expectedKey;
+  final String? previousKey;
+
+  const KeyFixResult({
+    required this.content,
+    required this.changed,
+    this.expectedKey,
+    this.previousKey,
+  });
 }

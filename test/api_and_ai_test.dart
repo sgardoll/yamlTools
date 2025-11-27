@@ -82,6 +82,23 @@ page:
       expect(path, 'page/id-Scaffold_example.yaml');
       expect(key, 'page/id-Scaffold_example');
     });
+
+    test('auto-fixes key to match file path, stripping id- prefix', () {
+      const yaml = '''
+page:
+  key: Scaffold_wrong
+  name: Example
+''';
+
+      final result = YamlFileUtils.ensureKeyMatchesFile(
+        yaml,
+        'archive_page/id-Scaffold_fixed.yaml',
+      );
+
+      expect(result.changed, isTrue);
+      expect(result.expectedKey, 'Scaffold_fixed.yaml');
+      expect(result.content.contains('key: Scaffold_fixed.yaml'), isTrue);
+    });
   });
 
   group('AIService', () {
