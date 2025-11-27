@@ -165,6 +165,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       bool? isValid;
       int? lastStatus;
       String? lastBody;
+      List<String>? lastErrors;
 
       for (final fileKey in candidateKeys) {
         // Create request payload
@@ -196,14 +197,30 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
-          if (data['success'] == true) {
+          final validationErrors = _extractValidationErrors(data);
+          lastErrors = validationErrors;
+          final hasKeyMismatchOnly = validationErrors.isNotEmpty &&
+              validationErrors.every(_looksLikeKeyMismatchError);
+
+          if (data['success'] == true && validationErrors.isEmpty) {
             usedKey = fileKey;
             isValid = true;
             validationError = null;
             break;
+          } else if (hasKeyMismatchOnly) {
+            // Treat as recoverable: prefer a non-extension key for upload.
+            final preferred = _preferredNonExtensionCandidate(candidateKeys);
+            usedKey = preferred ?? fileKey;
+            _lastValidatedFileKey = usedKey;
+            isValid = true;
+            validationError = null;
+            break;
           } else {
-            final errorMsg =
-                (data['error'] ?? data['message'] ?? 'Invalid YAML format')
+            final errorMsg = validationErrors.isNotEmpty
+                ? validationErrors.join('\n')
+                : (data['error'] ??
+                        data['message'] ??
+                        'Invalid YAML format')
                     .toString();
             isValid = false;
             validationError = _formatValidationMessage(
@@ -217,10 +234,12 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           // Parse detailed validation errors
           try {
             final errorData = json.decode(response.body);
+            final extracted = _extractValidationErrors(errorData);
+            lastErrors = extracted;
             final combined = [
               if (errorData['error'] != null) errorData['error'].toString(),
-              if (errorData['message'] != null)
-                errorData['message'].toString(),
+              if (errorData['message'] != null) errorData['message'].toString(),
+              if (extracted.isNotEmpty) extracted.join('\n'),
             ].where((e) => e.trim().isNotEmpty).join('\n');
             isValid = false;
             validationError = _formatValidationMessage(
@@ -265,7 +284,10 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         } else {
           _isValid = false;
           _lastValidatedFileKey = null;
+          final errorsText =
+              lastErrors != null && lastErrors!.isNotEmpty ? lastErrors!.join('\n') : null;
           _validationError = validationError ??
+              errorsText ??
               '🌐 Server error${lastStatus != null ? ' ($lastStatus)' : ''}. '
                   'Tried keys: ${candidateKeys.join(', ')}. '
                   '${lastBody != null && lastBody!.isNotEmpty ? 'Response: $lastBody' : ''}';
@@ -352,10 +374,14 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           break;
         } on FlutterFlowApiException catch (apiError) {
           lastApiError = apiError;
-          // If the API says it's a client error, don't try other keys.
-          if (apiError.statusCode != null &&
+          final isClientError = apiError.statusCode != null &&
               apiError.statusCode! >= 400 &&
-              apiError.statusCode! < 500) {
+              apiError.statusCode! < 500;
+
+          // If the client error is a key mismatch, try the next candidate.
+          if (isClientError &&
+              !_looksLikeKeyMismatchError(apiError.message) &&
+              !_looksLikeKeyMismatchError(apiError.body ?? '')) {
             rethrow;
           }
           // Otherwise, try the next candidate key.
@@ -547,6 +573,13 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     }
 
     return lines.join('\n');
+  }
+
+  bool _looksLikeKeyMismatchError(String text) {
+    final lower = text.toLowerCase();
+    return lower.contains('cannot change the key') ||
+        lower.contains('invalid file key') ||
+        lower.contains('file key mismatch');
   }
 
   bool _isFormattedValidationMessage(String original, String formatted) {
@@ -1181,6 +1214,40 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       }
     }
 
+    return null;
+  }
+
+  List<String> _extractValidationErrors(Map<String, dynamic> data) {
+    final errors = <String>[];
+    final direct = data['validationErrors'];
+    final nested = data['value'] is Map<String, dynamic>
+        ? (data['value'] as Map<String, dynamic>)['validationErrors']
+        : null;
+
+    void collect(dynamic source) {
+      if (source is List) {
+        for (final entry in source) {
+          if (entry is Map && entry['message'] != null) {
+            errors.add(entry['message'].toString());
+          } else if (entry is String) {
+            errors.add(entry);
+          }
+        }
+      }
+    }
+
+    collect(direct);
+    collect(nested);
+
+    return errors;
+  }
+
+  String? _preferredNonExtensionCandidate(List<String> candidates) {
+    for (final c in candidates) {
+      if (!c.endsWith('.yaml') && !c.endsWith('.yml')) {
+        return c;
+      }
+    }
     return null;
   }
 }
