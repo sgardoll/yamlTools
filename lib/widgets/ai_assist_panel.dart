@@ -26,7 +26,25 @@ class AIAssistPanel extends StatefulWidget {
 class _AIAssistPanelState extends State<AIAssistPanel> {
   final TextEditingController _apiKeyController = TextEditingController();
   final TextEditingController _promptController = TextEditingController();
+  final TextEditingController _intentSummaryController =
+      TextEditingController();
+  final TextEditingController _targetResourceController =
+      TextEditingController();
+  final TextEditingController _treeLocationController = TextEditingController();
+  final TextEditingController _componentDetailsController =
+      TextEditingController();
+  final TextEditingController _acceptanceCriteriaController =
+      TextEditingController();
+  final TextEditingController _bulkFindController = TextEditingController();
+  final TextEditingController _bulkReplaceController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final List<String> _intentTypeOptions = const [
+    'Add / Update UI',
+    'Data or action wiring',
+    'Theme or style change',
+    'Bulk property replace',
+  ];
+  String _intentType = 'Add / Update UI';
 
   AIState _state = AIState.idle;
   ProposedChange? _currentProposal;
@@ -51,6 +69,13 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
   void dispose() {
     _apiKeyController.dispose();
     _promptController.dispose();
+    _intentSummaryController.dispose();
+    _targetResourceController.dispose();
+    _treeLocationController.dispose();
+    _componentDetailsController.dispose();
+    _acceptanceCriteriaController.dispose();
+    _bulkFindController.dispose();
+    _bulkReplaceController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -101,8 +126,70 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
     }
   }
 
+  String _composePrompt() {
+    final sections = <String>[];
+    bool hasUserInput = false;
+
+    void addSection(String title, String value) {
+      if (value.trim().isEmpty) return;
+      sections.add('$title:\n${value.trim()}');
+      hasUserInput = true;
+    }
+
+    addSection(
+      'What the user should see (intent, not syntax)',
+      _intentSummaryController.text,
+    );
+    addSection(
+      'Target resource key/path (page/home, customAction/auth, theme, etc.)',
+      _targetResourceController.text,
+    );
+    addSection(
+      'Parent -> Child location in the tree',
+      _treeLocationController.text,
+    );
+    addSection(
+      'Widget or data details (colors, text, spacing, bindings)',
+      _componentDetailsController.text,
+    );
+
+    final findValue = _bulkFindController.text.trim();
+    final replaceValue = _bulkReplaceController.text.trim();
+    if (findValue.isNotEmpty || replaceValue.isNotEmpty) {
+      sections.add([
+        'Bulk property change:',
+        if (findValue.isNotEmpty) 'Find: $findValue',
+        if (replaceValue.isNotEmpty) 'Replace with: $replaceValue',
+      ].join('\n'));
+      hasUserInput = true;
+    }
+
+    addSection(
+      'Acceptance criteria / guardrails (what must stay unchanged)',
+      _acceptanceCriteriaController.text,
+    );
+    addSection('Additional guidance', _promptController.text);
+
+    if (!hasUserInput) return '';
+
+    sections.insert(0, 'Intent type:\n$_intentType');
+    sections.add(
+        'Reminder: Work from intent (e.g., "place a red box here"). YAML is a nested Parent -> Child tree; keep schema-compliant updates without adding Flutter/Dart boilerplate or syntax noise.');
+
+    return sections.join('\n\n');
+  }
+
   void _handleSubmit() async {
-    if (_promptController.text.isEmpty || _aiService == null) return;
+    if (_aiService == null) return;
+
+    final prompt = _composePrompt();
+    if (prompt.isEmpty) {
+      setState(() {
+        _errorMessage =
+            'Add an intent or guidance before asking the AI to edit YAML.';
+      });
+      return;
+    }
 
     setState(() {
       _state = AIState.processing;
@@ -111,7 +198,7 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
 
     try {
       final request = AIRequest(
-        userPrompt: _promptController.text,
+        userPrompt: prompt,
         pinnedFilePaths: _pinnedFiles.toList(),
         projectFiles: widget.currentFiles,
       );
@@ -153,6 +240,14 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
         _state = AIState.idle;
         _currentProposal = null;
         _promptController.clear();
+        _intentSummaryController.clear();
+        _targetResourceController.clear();
+        _treeLocationController.clear();
+        _componentDetailsController.clear();
+        _acceptanceCriteriaController.clear();
+        _bulkFindController.clear();
+        _bulkReplaceController.clear();
+        _intentType = _intentTypeOptions.first;
         _pinnedFiles.clear();
         _selectedModificationIndexes.clear();
       });
@@ -260,6 +355,196 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
           },
         );
       },
+    );
+  }
+
+  Widget _buildIntentHelperCard() {
+    return Container(
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.lightbulb_outline,
+                  color: AppTheme.secondaryColor, size: 18),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Work with intent and the YAML tree',
+                  style:
+                      AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Tell the AI what the user should experience ("I want a red box here") and where it lives in the Parent -> Child tree. YAML will handle the brackets and boilerplate.',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          ),
+          SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.borderColor.withOpacity(0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Visual -> YAML',
+                  style:
+                      AppTheme.captionLarge.copyWith(color: AppTheme.textMuted),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'Visual: Blue Button with white text\n'
+                  'YAML:\n'
+                  'type: Button\n'
+                  'properties:\n'
+                  '  color: #0000FF\n'
+                  '  text: "Submit"\n'
+                  '  elevation: 2\n'
+                  '  children: []',
+                  style: AppTheme.monospaceSmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIntentTypeSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Intent type',
+          style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _intentTypeOptions.map((option) {
+            final selected = option == _intentType;
+            return ChoiceChip(
+              label: Text(
+                option,
+                style: TextStyle(
+                  color:
+                      selected ? AppTheme.primaryColor : AppTheme.textPrimary,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+              selected: selected,
+              onSelected: (_) => setState(() => _intentType = option),
+              selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+              backgroundColor: Colors.white.withOpacity(0.05),
+              side: BorderSide(
+                color: selected ? AppTheme.primaryColor : AppTheme.dividerColor,
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLabeledField({
+    required String label,
+    required TextEditingController controller,
+    String? hint,
+    int maxLines = 1,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          decoration: AppTheme.inputDecoration(hintText: hint),
+          maxLines: maxLines,
+          minLines: maxLines,
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBulkReplaceCard() {
+    return Container(
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.02),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.find_replace,
+                  color: AppTheme.secondaryColor, size: 18),
+              SizedBox(width: 8),
+              Text(
+                'Bulk find & replace (optional)',
+                style:
+                    AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Perfect for edits like padding: 8 -> padding: 12 across many nodes.',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.textSecondary),
+          ),
+          SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _bulkFindController,
+                  decoration: AppTheme.inputDecoration(
+                    labelText: 'Find',
+                    hintText: 'padding: 8',
+                  ),
+                  maxLines: 1,
+                  style: TextStyle(color: AppTheme.textPrimary),
+                ),
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _bulkReplaceController,
+                  decoration: AppTheme.inputDecoration(
+                    labelText: 'Replace with',
+                    hintText: 'padding: 12',
+                  ),
+                  maxLines: 1,
+                  style: TextStyle(color: AppTheme.textPrimary),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -424,77 +709,128 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Describe the changes you want to make:',
-            style: AppTheme.bodyMedium,
-          ),
-          SizedBox(height: 8),
           Expanded(
-            child: TextField(
-              controller: _promptController,
-              decoration: InputDecoration(
-                hintText:
-                    'E.g., "Add a verified boolean field to the users collection" or "Change the primary color to red"',
-                border: OutlineInputBorder(),
-                alignLabelWithHint: true,
-              ),
-              maxLines: null,
-              expands: true,
-              textAlignVertical: TextAlignVertical.top,
-            ),
-          ),
-          SizedBox(height: 16),
-
-          // Context Pinning
-          Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: _showContextPicker,
-                icon: Icon(Icons.playlist_add_check, size: 18),
-                label: Text('Context Files (${_pinnedFiles.length})'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _pinnedFiles.isNotEmpty
-                      ? Colors.blue[100]
-                      : Colors.grey[200],
-                  foregroundColor: Colors.black87,
+            child: ListView(
+              controller: _scrollController,
+              padding: EdgeInsets.zero,
+              children: [
+                Text(
+                  'Guide the AI with intent',
+                  style:
+                      AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
                 ),
-              ),
-              Spacer(),
-            ],
+                SizedBox(height: 8),
+                _buildIntentHelperCard(),
+                SizedBox(height: 12),
+                _buildIntentTypeSelector(),
+                SizedBox(height: 12),
+                _buildLabeledField(
+                  label: 'What should the user see?',
+                  controller: _intentSummaryController,
+                  hint:
+                      'E.g., place a red box under the hero banner with 16px padding and a CTA button.',
+                  maxLines: 3,
+                ),
+                SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildLabeledField(
+                        label: 'Target resource key/path',
+                        controller: _targetResourceController,
+                        hint:
+                            'page/home, customAction/auth, theme, firestore/schema',
+                        maxLines: 1,
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: _buildLabeledField(
+                        label: 'Parent -> Child location',
+                        controller: _treeLocationController,
+                        hint: 'scaffold > body > cards[0] > button',
+                        maxLines: 1,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 12),
+                _buildLabeledField(
+                  label: 'Widget or data details',
+                  controller: _componentDetailsController,
+                  hint:
+                      'Component type, colors, text, spacing, identifiers to keep, data bindings/actions.',
+                  maxLines: 3,
+                ),
+                SizedBox(height: 12),
+                _buildLabeledField(
+                  label: 'Acceptance criteria / guardrails',
+                  controller: _acceptanceCriteriaController,
+                  hint:
+                      'What must stay unchanged, data contracts, key/name pairs, validation rules.',
+                  maxLines: 3,
+                ),
+                SizedBox(height: 12),
+                _buildBulkReplaceCard(),
+                SizedBox(height: 12),
+                _buildLabeledField(
+                  label: 'Additional guidance (optional)',
+                  controller: _promptController,
+                  hint:
+                      'Any extra context or constraints for the AI to follow.',
+                  maxLines: 4,
+                ),
+                SizedBox(height: 16),
+
+                // Context Pinning
+                Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: _showContextPicker,
+                      icon: Icon(Icons.playlist_add_check, size: 18),
+                      label: Text('Context Files (${_pinnedFiles.length})'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _pinnedFiles.isNotEmpty
+                            ? Colors.blue[100]
+                            : Colors.grey[200],
+                        foregroundColor: Colors.black87,
+                      ),
+                    ),
+                    Spacer(),
+                  ],
+                ),
+
+                if (_pinnedFiles.isNotEmpty) ...[
+                  SizedBox(height: 8),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: _pinnedFiles
+                        .map((f) => Chip(
+                              label: Text(f, style: TextStyle(fontSize: 10)),
+                              deleteIcon: Icon(Icons.close, size: 12),
+                              onDeleted: () {
+                                setState(() {
+                                  _pinnedFiles.remove(f);
+                                });
+                              },
+                              visualDensity: VisualDensity.compact,
+                            ))
+                        .toList(),
+                  ),
+                ],
+
+                if (_errorMessage != null) ...[
+                  SizedBox(height: 12),
+                  Text(
+                    _errorMessage!,
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ],
+              ],
+            ),
           ),
-
-          if (_pinnedFiles.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0),
-              child: Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: _pinnedFiles
-                    .map((f) => Chip(
-                          label: Text(f, style: TextStyle(fontSize: 10)),
-                          deleteIcon: Icon(Icons.close, size: 12),
-                          onDeleted: () {
-                            setState(() {
-                              _pinnedFiles.remove(f);
-                            });
-                          },
-                          visualDensity: VisualDensity.compact,
-                        ))
-                    .toList(),
-              ),
-            ),
-
-          SizedBox(height: 16),
-
-          if (_errorMessage != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: Text(
-                _errorMessage!,
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
-
+          SizedBox(height: 12),
           SizedBox(
             height: 48,
             child: ElevatedButton.icon(
