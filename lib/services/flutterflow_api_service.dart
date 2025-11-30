@@ -325,13 +325,11 @@ class FlutterFlowApiService {
   /// from FlutterFlow for the specified project.
   ///
   /// This is the OFFICIAL way to determine which file keys are valid for
-  /// a project. According to FlutterFlow documentation: "Users must call
-  /// /listPartitionedFileNames first to obtain the complete authoritative
-  /// list for their specific project, as the schema varies by project
-  /// composition."
+  /// a project. According to FlutterFlow documentation: "Before you read
+  /// or update project files, you need to know what YAML files are available."
   ///
-  /// Returns a list of file keys (without .yaml extension) that can be
-  /// used with validateProjectYaml and updateProjectByYaml endpoints.
+  /// Returns a list of file keys that can be used with validateProjectYaml
+  /// and updateProjectByYaml endpoints.
   ///
   /// Throws FlutterFlowApiException if the request fails.
   static Future<List<String>> listPartitionedFileNames({
@@ -342,20 +340,19 @@ class FlutterFlowApiService {
       throw ArgumentError('Project ID and API token cannot be empty');
     }
 
-    final uri = Uri.parse('$baseUrl/listPartitionedFileNames');
+    // Use GET with query parameter (not POST with body)
+    final uri = Uri.parse('$baseUrl/listPartitionedFileNames').replace(
+      queryParameters: {'projectId': projectId},
+    );
     debugPrint('Fetching partitioned file names from: $uri');
 
     try {
-      final response = await http.post(
+      final response = await http.get(
         uri,
         headers: {
           'Authorization': 'Bearer $apiToken',
-          'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: jsonEncode({
-          'projectId': projectId,
-        }),
       );
 
       debugPrint('List files response status: ${response.statusCode}');
