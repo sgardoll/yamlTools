@@ -170,150 +170,131 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             'Auto-corrected YAML key from "${fixed.previousKey}" to "${fixed.expectedKey}" for ${widget.filePath}');
       }
 
-      // Extract file key from the file path using the same method as update
-      final candidateKeys = FlutterFlowApiService.buildFileKeyCandidates(
+      // Use the OFFICIAL method: resolve file key from FlutterFlow's authoritative list
+      final fileKey = await FlutterFlowApiService.resolveFileKey(
+        projectId: widget.projectId,
+        apiToken: apiToken,
         filePath: widget.filePath,
         yamlContent: content,
       );
 
-      debugPrint(
-          'Validating file: ${widget.filePath} -> candidates: ${candidateKeys.map((k) => '"$k"').join(', ')}');
+      if (fileKey == null) {
+        setState(() {
+          _isValid = false;
+          _validationError =
+              '❌ File key resolution failed\n'
+              '• File: ${widget.filePath}\n'
+              '• This file is not recognized by FlutterFlow.\n'
+              '💡 Tip: This file may not be directly editable via the API.\n'
+              '  Try editing the parent file instead (e.g., page-widget-tree-outline.yaml).';
+        });
+        return;
+      }
+
+      debugPrint('Validating file: ${widget.filePath} -> resolved key: "$fileKey"');
 
       final apiUrl = '${FlutterFlowApiService.baseUrl}/validateProjectYaml';
-      String? usedKey;
-      String? validationError;
-      bool? isValid;
-      int? lastStatus;
-      String? lastBody;
-      List<String>? lastErrors;
-      String? lastKeyAttempt;
 
-      for (final fileKey in candidateKeys) {
-        // Create request payload
-        final requestBody = json.encode({
-          'projectId': widget.projectId,
-          'fileKey': fileKey,
-          'fileContent': content,
-        });
+      // Create request payload
+      final requestBody = json.encode({
+        'projectId': widget.projectId,
+        'fileKey': fileKey,
+        'fileContent': content,
+      });
 
-        debugPrint(
-            'Sending validation request to: $apiUrl with key "$fileKey"');
+      debugPrint('Sending validation request to: $apiUrl with key "$fileKey"');
 
-        final response = await http.post(
-          Uri.parse(apiUrl),
-          headers: {
-            'Authorization': 'Bearer $apiToken',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            // Add cache control to prevent caching issues
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-          },
-          body: requestBody,
-        );
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Authorization': 'Bearer $apiToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          // Add cache control to prevent caching issues
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+        },
+        body: requestBody,
+      );
 
-        debugPrint('Validation response status: ${response.statusCode}');
-        debugPrint('Validation response body: ${response.body}');
-        lastStatus = response.statusCode;
-        lastBody = response.body;
-        lastKeyAttempt = fileKey;
+      debugPrint('Validation response status: ${response.statusCode}');
+      debugPrint('Validation response body: ${response.body}');
 
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          final validationErrors = _extractValidationErrors(data);
-          lastErrors = validationErrors;
-          if (data['success'] == true && validationErrors.isEmpty) {
-            usedKey = fileKey;
-            isValid = true;
-            validationError = null;
-            break;
-          } else {
-            final errorMsg = validationErrors.isNotEmpty
-                ? validationErrors.join('\n')
-                : (data['error'] ?? data['message'] ?? 'Invalid YAML format')
-                    .toString();
-            final keyMismatch = _firstKeyMismatch(validationErrors);
-            isValid = false;
-            validationError = keyMismatch ??
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final validationErrors = _extractValidationErrors(data);
+        if (data['success'] == true && validationErrors.isEmpty) {
+          setState(() {
+            _isValid = true;
+            _validationError = null;
+            _lastValidatedFileKey = fileKey;
+          });
+        } else {
+          final errorMsg = validationErrors.isNotEmpty
+              ? validationErrors.join('\n')
+              : (data['error'] ?? data['message'] ?? 'Invalid YAML format')
+                  .toString();
+          final keyMismatch = _firstKeyMismatch(validationErrors);
+          setState(() {
+            _isValid = false;
+            _validationError = keyMismatch ??
                 _formatValidationMessage(
                   errorMsg,
                   yamlContent: content,
                   currentFilePath: widget.filePath,
                 );
-            break;
-          }
-        } else if (response.statusCode == 400) {
-          // Parse detailed validation errors
-          try {
-            final errorData = json.decode(response.body);
-            final extracted = _extractValidationErrors(errorData);
-            lastErrors = extracted;
-            final combined = [
-              if (errorData['error'] != null) errorData['error'].toString(),
-              if (errorData['message'] != null) errorData['message'].toString(),
-              if (extracted.isNotEmpty) extracted.join('\n'),
-            ].where((e) => e.trim().isNotEmpty).join('\n');
-            isValid = false;
-            final keyMismatch = _firstKeyMismatch(extracted);
-            validationError = keyMismatch ??
+          });
+        }
+      } else if (response.statusCode == 400) {
+        // Parse detailed validation errors
+        try {
+          final errorData = json.decode(response.body);
+          final extracted = _extractValidationErrors(errorData);
+          final combined = [
+            if (errorData['error'] != null) errorData['error'].toString(),
+            if (errorData['message'] != null) errorData['message'].toString(),
+            if (extracted.isNotEmpty) extracted.join('\n'),
+          ].where((e) => e.trim().isNotEmpty).join('\n');
+          final keyMismatch = _firstKeyMismatch(extracted);
+          setState(() {
+            _isValid = false;
+            _validationError = keyMismatch ??
                 _formatValidationMessage(
                   combined.isEmpty ? response.body : combined,
                   yamlContent: content,
                   currentFilePath: widget.filePath,
                 );
-            break;
-          } catch (e) {
-            isValid = false;
-            validationError = _formatValidationMessage(
+          });
+        } catch (e) {
+          setState(() {
+            _isValid = false;
+            _validationError = _formatValidationMessage(
               'Validation failed (HTTP ${response.statusCode}): ${response.body}',
               yamlContent: content,
               currentFilePath: widget.filePath,
             );
-            break;
-          }
-        } else if (response.statusCode == 401) {
-          isValid = false;
-          validationError =
-              '🔑 Authentication failed. Please check your API token.';
-          break;
-        } else if (response.statusCode == 403) {
-          isValid = false;
-          validationError =
-              '🚫 Access denied. Check your API token permissions.';
-          break;
-        } else {
-          // 5xx: try the next candidate key before giving up
-          isValid = false;
-          validationError = null;
-          continue;
+          });
         }
-      }
-
-      setState(() {
-        if (usedKey != null && isValid == true) {
-          _isValid = true;
-          _validationError = null;
-          _lastValidatedFileKey = usedKey;
-        } else {
+      } else if (response.statusCode == 401) {
+        setState(() {
           _isValid = false;
-          _lastValidatedFileKey = null;
-          final errorsText = lastErrors != null && lastErrors!.isNotEmpty
-              ? lastErrors!.join('\n')
-              : null;
-          _validationError = validationError ??
-              errorsText ??
-              [
-                '🌐 Server error${lastStatus != null ? ' ($lastStatus)' : ''}.',
-                if (lastKeyAttempt != null) 'Last key tried: $lastKeyAttempt',
-                if (candidateKeys.isNotEmpty)
-                  'Tried keys: ${candidateKeys.join(', ')}',
-                if (lastBody != null && lastBody!.isNotEmpty)
-                  'Response: $lastBody',
-              ]
-                  .where((e) => e != null && e.toString().trim().isNotEmpty)
-                  .join(' ');
-        }
-      });
+          _validationError =
+              '🔑 Authentication failed. Please check your API token.';
+        });
+      } else if (response.statusCode == 403) {
+        setState(() {
+          _isValid = false;
+          _validationError =
+              '🚫 Access denied. Check your API token permissions.';
+        });
+      } else {
+        setState(() {
+          _isValid = false;
+          _validationError =
+              '🌐 Server error (${response.statusCode}).\n'
+              'Response: ${response.body}';
+        });
+      }
     } catch (e) {
       debugPrint('Validation error: $e');
       setState(() {
@@ -373,65 +354,41 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             'Auto-corrected YAML key from "${fixed.previousKey}" to "${fixed.expectedKey}" for $effectiveFilePath');
       }
 
-      // Build candidate keys (YAML-derived first), preferring a key that already validated.
-      final candidateKeys = FlutterFlowApiService.buildFileKeyCandidates(
-        filePath: effectiveFilePath,
-        yamlContent: content,
+      // Use the OFFICIAL method: resolve file key from FlutterFlow's authoritative list
+      // If we have a previously validated key, try to use it; otherwise resolve fresh
+      String? fileKey = _lastValidatedFileKey;
+
+      if (fileKey == null) {
+        fileKey = await FlutterFlowApiService.resolveFileKey(
+          projectId: widget.projectId,
+          apiToken: apiToken,
+          filePath: effectiveFilePath,
+          yamlContent: content,
+        );
+      }
+
+      if (fileKey == null) {
+        throw FlutterFlowApiException(
+          message:
+              'File key resolution failed: This file is not recognized by FlutterFlow.\n'
+              'File: $effectiveFilePath\n'
+              'This file may not be directly editable via the API. Try editing the parent file instead.',
+          endpoint: FlutterFlowApiService.baseUrl,
+        );
+      }
+
+      attemptedFileKey = fileKey;
+      debugPrint('Updating file via API: $effectiveFilePath -> key: "$fileKey"');
+
+      // Call the FlutterFlow API with the resolved file key
+      await FlutterFlowApiService.updateProjectYaml(
+        projectId: widget.projectId,
+        apiToken: apiToken,
+        fileKeyToContent: {fileKey: content},
       );
-      if (_lastValidatedFileKey != null &&
-          candidateKeys.contains(_lastValidatedFileKey)) {
-        candidateKeys
-          ..remove(_lastValidatedFileKey)
-          ..insert(0, _lastValidatedFileKey!);
-      }
 
-      FlutterFlowApiException? lastApiError;
-      bool updated = false;
-
-      for (final key in candidateKeys) {
-        attemptedFileKey = key;
-        print('Updating file via API: $effectiveFilePath -> key: "$key"');
-
-        // Call the FlutterFlow API
-        try {
-          await FlutterFlowApiService.updateProjectYaml(
-            projectId: widget.projectId,
-            apiToken: apiToken,
-            fileKeyToContent: {key: content},
-          );
-          // Success, record key and exit loop
-          _lastValidatedFileKey = key;
-          updated = true;
-          break;
-        } on FlutterFlowApiException catch (apiError) {
-          lastApiError = apiError;
-          final isClientError = apiError.statusCode != null &&
-              apiError.statusCode! >= 400 &&
-              apiError.statusCode! < 500;
-
-          // If the client error is a key mismatch, try the next candidate.
-          if (isClientError &&
-              !_looksLikeKeyMismatchError(apiError.message) &&
-              !_looksLikeKeyMismatchError(apiError.body ?? '')) {
-            rethrow;
-          }
-          // Otherwise, try the next candidate key.
-          continue;
-        }
-      }
-
-      if (!updated) {
-        // If we exhausted candidates without success, throw the last API error.
-        if (lastApiError != null) {
-          throw lastApiError;
-        } else {
-          throw FlutterFlowApiException(
-            message:
-                'Update failed: could not find a valid file key for $effectiveFilePath',
-            endpoint: FlutterFlowApiService.baseUrl,
-          );
-        }
-      }
+      // Success, record the key
+      _lastValidatedFileKey = fileKey;
 
       print('Successfully updated file via API: $effectiveFilePath');
 
