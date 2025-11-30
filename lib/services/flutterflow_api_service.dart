@@ -321,6 +321,158 @@ class FlutterFlowApiService {
     return fileKeyToContent;
   }
 
+  /// Fetches the authoritative list of all partitioned file names (keys)
+  /// from FlutterFlow for the specified project.
+  ///
+  /// This is the OFFICIAL way to determine which file keys are valid for
+  /// a project. According to FlutterFlow documentation: "Users must call
+  /// /listPartitionedFileNames first to obtain the complete authoritative
+  /// list for their specific project, as the schema varies by project
+  /// composition."
+  ///
+  /// Returns a list of file keys (without .yaml extension) that can be
+  /// used with validateProjectYaml and updateProjectByYaml endpoints.
+  ///
+  /// Throws FlutterFlowApiException if the request fails.
+  static Future<List<String>> listPartitionedFileNames({
+    required String projectId,
+    required String apiToken,
+  }) async {
+    if (projectId.isEmpty || apiToken.isEmpty) {
+      throw ArgumentError('Project ID and API token cannot be empty');
+    }
+
+    final uri = Uri.parse('$baseUrl/listPartitionedFileNames');
+    debugPrint('Fetching partitioned file names from: $uri');
+
+    try {
+      final response = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $apiToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'projectId': projectId,
+        }),
+      );
+
+      debugPrint('List files response status: ${response.statusCode}');
+      debugPrint('List files response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        // The API returns { "fileNames": ["file1", "file2", ...] }
+        if (data is Map<String, dynamic> && data['fileNames'] is List) {
+          final fileNames = (data['fileNames'] as List)
+              .map((name) => name.toString())
+              .toList();
+          debugPrint('Retrieved ${fileNames.length} file names from FlutterFlow');
+          return fileNames;
+        }
+
+        throw FlutterFlowApiException(
+          endpoint: uri.toString(),
+          statusCode: response.statusCode,
+          body: response.body,
+          message: 'Unexpected response format: missing or invalid fileNames array',
+        );
+      }
+
+      throw buildApiException(
+        endpoint: uri.toString(),
+        response: response,
+      );
+    } catch (e) {
+      if (e is FlutterFlowApiException) {
+        rethrow;
+      }
+
+      debugPrint('Error fetching partitioned file names: $e');
+      throw FlutterFlowApiException(
+        endpoint: uri.toString(),
+        statusCode: null,
+        body: null,
+        message: 'Network error while fetching file names: $e',
+        isNetworkError: true,
+      );
+    }
+  }
+
+  /// Resolves a local file path to its authoritative FlutterFlow file key
+  /// by querying the project's file list.
+  ///
+  /// This function:
+  /// 1. Fetches the complete list of file keys from FlutterFlow
+  /// 2. Normalizes the provided file path
+  /// 3. Finds the best matching key from the authoritative list
+  ///
+  /// Returns the exact file key to use with the API, or null if no match found.
+  static Future<String?> resolveFileKey({
+    required String projectId,
+    required String apiToken,
+    required String filePath,
+    String? yamlContent,
+  }) async {
+    // Get the authoritative list from FlutterFlow
+    final authoritativeKeys = await listPartitionedFileNames(
+      projectId: projectId,
+      apiToken: apiToken,
+    );
+
+    // Normalize the file path
+    final normalized = _normalizeArchivePath(filePath);
+    final withoutExt = _stripYamlExtension(normalized);
+
+    // Try to find exact match first (without extension)
+    if (authoritativeKeys.contains(withoutExt)) {
+      debugPrint('Resolved "$filePath" -> "$withoutExt" (exact match)');
+      return withoutExt;
+    }
+
+    // Try to find exact match with extension
+    final withExt = _ensureYamlExtension(withoutExt);
+    if (authoritativeKeys.contains(withExt)) {
+      debugPrint('Resolved "$filePath" -> "$withExt" (exact match with extension)');
+      return withExt;
+    }
+
+    // Try to match by basename (for cases where archive path differs)
+    final basename = withoutExt.split('/').last;
+    for (final key in authoritativeKeys) {
+      if (key.endsWith('/$basename') || key == basename) {
+        debugPrint('Resolved "$filePath" -> "$key" (basename match)');
+        return key;
+      }
+    }
+
+    // Try to infer from YAML content if provided
+    if (yamlContent != null) {
+      final inferred = YamlFileUtils.inferFileKeyFromContent(yamlContent);
+      if (inferred != null) {
+        final inferredNormalized = _stripYamlExtension(_normalizeArchivePath(inferred));
+        if (authoritativeKeys.contains(inferredNormalized)) {
+          debugPrint('Resolved "$filePath" -> "$inferredNormalized" (YAML content match)');
+          return inferredNormalized;
+        }
+      }
+    }
+
+    // Log available keys for debugging
+    debugPrint('Failed to resolve "$filePath"');
+    debugPrint('Available keys matching pattern:');
+    final pathParts = withoutExt.split('/');
+    for (final key in authoritativeKeys) {
+      if (pathParts.any((part) => key.contains(part))) {
+        debugPrint('  - $key');
+      }
+    }
+
+    return null;
+  }
+
   /// Test method to verify file key conversion (for debugging)
   static void testFileKeyConversion() {
     final testCases = [
