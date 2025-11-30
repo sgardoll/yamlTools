@@ -160,6 +160,15 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         return;
       }
 
+      // Unwrap accidental recursive serialization of fullContent.
+      final sanitized = YamlFileUtils.sanitizeNestedFullContent(content);
+      if (sanitized.changed) {
+        content = sanitized.content;
+        _textController.text = content;
+        debugPrint(
+            'Sanitized nested fullContent serialization for ${widget.filePath}');
+      }
+
       // Auto-fix YAML key based on file path before sending.
       final fixed =
           YamlFileUtils.ensureKeyMatchesFile(content, widget.filePath);
@@ -342,6 +351,15 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             'Detected mismatch between file path and YAML key. Renaming "${widget.filePath}" -> "$inferredPath" before upload.');
         widget.onFileRenamed?.call(widget.filePath, inferredPath);
         effectiveFilePath = inferredPath;
+      }
+
+      // Unwrap accidental recursive serialization of fullContent.
+      final sanitized = YamlFileUtils.sanitizeNestedFullContent(content);
+      if (sanitized.changed) {
+        content = sanitized.content;
+        _textController.text = content;
+        debugPrint(
+            'Sanitized nested fullContent serialization for $effectiveFilePath');
       }
 
       // Auto-fix YAML key based on file path before upload.

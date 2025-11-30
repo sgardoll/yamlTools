@@ -169,6 +169,63 @@ class YamlFileUtils {
     );
   }
 
+  /// Detects and unwraps recursively serialized `fullContent` blobs where the
+  /// entire YAML document has been stuffed into the `fullContent` string.
+  /// Returns the original content when no fix is applied.
+  static SanitizeResult sanitizeNestedFullContent(String yamlContent) {
+    try {
+      final parsed = loadYaml(yamlContent);
+      if (parsed is! YamlMap) {
+        return SanitizeResult(content: yamlContent, changed: false);
+      }
+
+      final fullContentValue = parsed['fullContent'];
+      if (fullContentValue is! String) {
+        return SanitizeResult(content: yamlContent, changed: false);
+      }
+
+      // Heuristic: if the fullContent string itself parses to a YAML map that
+      // also contains fullContent, we treat it as a recursive serialization.
+      final innermost = _extractInnermostFullContent(fullContentValue);
+      if (innermost == null || identical(innermost, fullContentValue)) {
+        return SanitizeResult(content: yamlContent, changed: false);
+      }
+
+      final typeValue = parsed['type'];
+      final unlockedValue = parsed['isUnlocked'];
+
+      final buffer = StringBuffer();
+      if (typeValue != null) buffer.writeln('type: $typeValue');
+      if (unlockedValue != null) buffer.writeln('isUnlocked: $unlockedValue');
+      buffer.writeln('fullContent: |');
+      for (final line in innermost.split('\n')) {
+        buffer.writeln(line.isEmpty ? '' : '  $line');
+      }
+
+      return SanitizeResult(content: buffer.toString().trimRight(), changed: true);
+    } catch (_) {
+      return SanitizeResult(content: yamlContent, changed: false);
+    }
+  }
+
+  static String? _extractInnermostFullContent(String value) {
+    var current = value;
+    // Cap recursion depth to avoid runaway loops on malformed data.
+    for (var i = 0; i < 5; i++) {
+      try {
+        final parsed = loadYaml(current);
+        if (parsed is YamlMap && parsed['fullContent'] is String) {
+          current = parsed['fullContent'] as String;
+          continue;
+        }
+      } catch (_) {
+        // Stop if we can't parse further.
+      }
+      return current;
+    }
+    return current;
+  }
+
   static String? _folderForSection(String sectionKey) {
     switch (sectionKey) {
       case 'page':
@@ -223,4 +280,11 @@ class NormalizedPath {
     required this.apiFileKey,
     required this.expectedYamlKey,
   });
+}
+
+class SanitizeResult {
+  final String content;
+  final bool changed;
+
+  const SanitizeResult({required this.content, required this.changed});
 }
