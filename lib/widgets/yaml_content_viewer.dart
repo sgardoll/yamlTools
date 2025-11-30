@@ -170,7 +170,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             'Auto-corrected YAML key from "${fixed.previousKey}" to "${fixed.expectedKey}" for ${widget.filePath}');
       }
 
-      // Use the OFFICIAL method: resolve file key from FlutterFlow's authoritative list
+      // Empirically resolve the file key by probing validation endpoint candidates
       final fileKey = await FlutterFlowApiService.resolveFileKey(
         projectId: widget.projectId,
         apiToken: apiToken,
@@ -354,7 +354,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             'Auto-corrected YAML key from "${fixed.previousKey}" to "${fixed.expectedKey}" for $effectiveFilePath');
       }
 
-      // Use the OFFICIAL method: resolve file key from FlutterFlow's authoritative list
+      // Empirically resolve the file key by probing validation endpoint candidates
       // If we have a previously validated key, try to use it; otherwise resolve fresh
       String? fileKey = _lastValidatedFileKey;
 

@@ -5,6 +5,8 @@ import 'yaml_file_utils.dart';
 
 class FlutterFlowApiService {
   static const String baseUrl = 'https://api.flutterflow.io/v2';
+  static final Map<String, String> _fileKeyCache = {};
+  static final Map<_FileKeyScope, String> _formatPreferenceByScope = {};
 
   /// A structured exception to preserve rich error details from the API
   /// so the UI can present actionable feedback (path, line/col, message).
@@ -233,43 +235,54 @@ class FlutterFlowApiService {
     required String filePath,
     String? yamlContent,
   }) {
-    final added = <String>{};
-    final candidates = <String>[];
+    final seen = <String>{};
+    final prioritized = <String>[];
+    final ordered = <String>[];
 
-    void add(String raw) {
-      final normalized = _normalizeArchivePath(raw);
-      if (normalized.isEmpty) return;
-      if (added.add(normalized)) {
-        candidates.add(normalized);
+    void add(String raw, {bool prefer = false}) {
+      final normalized = _normalizeForCandidates(raw);
+      if (normalized.isEmpty || !seen.add(normalized)) return;
+      if (prefer) {
+        prioritized.add(normalized);
+      } else {
+        ordered.add(normalized);
       }
     }
 
-    final normalizedPath = _normalizeArchivePath(filePath);
-    final strippedPath = _stripYamlExtension(normalizedPath);
-    final pathHasExtension = normalizedPath != strippedPath;
-
-    // 1) Prefer the exact path with extension when present.
-    if (pathHasExtension) {
-      add(_ensureYamlExtension(normalizedPath));
-    }
-
-    // 2) Path without extension.
-    add(strippedPath);
-
-    // 3) Path with ensured extension (covers cases where original lacked it).
-    add(_ensureYamlExtension(strippedPath));
-
-    // 1) Prefer the key encoded inside the YAML itself.
+    // Inferred key from YAML takes precedence so we preserve the schema-driven intent.
     if (yamlContent != null) {
       final inferred = YamlFileUtils.inferFileKeyFromContent(yamlContent);
       if (inferred != null && inferred.trim().isNotEmpty) {
-        final normalized = _normalizeArchivePath(inferred.trim());
-        add(_ensureYamlExtension(normalized));
-        add(_stripYamlExtension(normalized));
+        final normalizedInferred = _normalizeForCandidates(inferred.trim());
+        add(_stripYamlExtension(normalizedInferred), prefer: true);
+        add(_ensureYamlExtensionPreservingArchive(normalizedInferred),
+            prefer: true);
       }
     }
 
-    return candidates;
+    final normalizedPath = _normalizeForCandidates(filePath);
+    final withExt = _ensureYamlExtensionPreservingArchive(normalizedPath);
+    final withoutExt = _stripYamlExtension(withExt);
+
+    final archivePath = _withArchivePrefix(normalizedPath);
+    final archiveWithExt = _ensureYamlExtensionPreservingArchive(archivePath);
+    final archiveWithoutExt = _stripYamlExtension(archiveWithExt);
+
+    final withoutArchive = _stripArchivePrefix(normalizedPath);
+    final withoutArchiveWithExt =
+        _ensureYamlExtensionPreservingArchive(withoutArchive);
+    final withoutArchiveWithoutExt =
+        _stripYamlExtension(withoutArchiveWithExt);
+
+    // Default probing order per empirical strategy (no extension -> extension -> archive variants).
+    add(withoutExt);
+    add(withExt);
+    add(archiveWithExt);
+    add(archiveWithoutExt);
+    add(withoutArchiveWithoutExt);
+    add(withoutArchiveWithExt);
+
+    return [...prioritized, ...ordered];
   }
 
   static String _normalizeArchivePath(String filePath) {
@@ -303,6 +316,129 @@ class FlutterFlowApiService {
     return '$normalized.yaml';
   }
 
+  static String _normalizeForCandidates(String filePath) {
+    var normalized = filePath.trim().replaceAll('\\', '/');
+    if (normalized.startsWith('/')) {
+      normalized = normalized.substring(1);
+    }
+    normalized = normalized.replaceFirst(
+      RegExp(r'(\\.ya?ml)+$', caseSensitive: false),
+      '.yaml',
+    );
+    return normalized;
+  }
+
+  static String _withArchivePrefix(String filePath) {
+    final normalized = _normalizeForCandidates(filePath);
+    return normalized.startsWith('archive_')
+        ? normalized
+        : 'archive_$normalized';
+  }
+
+  static String _stripArchivePrefix(String filePath) {
+    final normalized = _normalizeForCandidates(filePath);
+    return normalized.startsWith('archive_')
+        ? normalized.substring(8)
+        : normalized;
+  }
+
+  static String _ensureYamlExtensionPreservingArchive(String filePath) {
+    final normalized = _normalizeForCandidates(filePath);
+    if (normalized.toLowerCase().endsWith('.yaml')) {
+      return normalized;
+    }
+    if (normalized.toLowerCase().endsWith('.yml')) {
+      return '${normalized.substring(0, normalized.length - 4)}.yaml';
+    }
+    return '$normalized.yaml';
+  }
+
+  static String _cacheKeyForPath(String filePath) =>
+      _stripYamlExtension(_normalizeForCandidates(filePath));
+
+  static List<String> _prioritizeCandidates(
+    List<String> candidates,
+    String filePath,
+  ) {
+    final preferredSignature = _formatPreferenceByScope[_scopeForPath(filePath)];
+    if (preferredSignature == null) {
+      return candidates;
+    }
+
+    final prioritized = <String>[];
+    final remaining = <String>[];
+
+    for (final candidate in candidates) {
+      if (_formatSignature(candidate) == preferredSignature) {
+        prioritized.add(candidate);
+      } else {
+        remaining.add(candidate);
+      }
+    }
+
+    return [...prioritized, ...remaining];
+  }
+
+  static void _rememberFormatPreference(String filePath, String candidate) {
+    final scope = _scopeForPath(filePath);
+    final signature = _formatSignature(candidate);
+    _formatPreferenceByScope[scope] = signature;
+    debugPrint(
+      'Cached preferred key format for $scope: $signature (from "$candidate")',
+    );
+  }
+
+  static String _formatSignature(String candidate) {
+    final normalized = _normalizeForCandidates(candidate);
+    final hasArchivePrefix = normalized.startsWith('archive_');
+    final hasExtension = normalized.toLowerCase().endsWith('.yaml') ||
+        normalized.toLowerCase().endsWith('.yml');
+    return '${hasArchivePrefix ? 'archive' : 'noArchive'}|'
+        '${hasExtension ? 'ext' : 'noExt'}';
+  }
+
+  static _FileKeyScope _scopeForPath(String filePath) {
+    final normalized = _normalizeForCandidates(filePath);
+    return normalized.contains('/') ? _FileKeyScope.nested : _FileKeyScope.root;
+  }
+
+  static Future<bool> _testFileKey({
+    required String projectId,
+    required String apiToken,
+    required String fileKey,
+    required String content,
+  }) async {
+    final uri = Uri.parse('$baseUrl/validateProjectYaml');
+    final payload = {
+      'projectId': projectId,
+      'fileKey': fileKey,
+      'fileContent': content,
+    };
+
+    debugPrint('Validation probe payload for "$fileKey": ${jsonEncode(payload)}');
+
+    try {
+      final response = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $apiToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode(payload),
+      );
+
+      debugPrint(
+          'Validation probe response (${response.statusCode}) for "$fileKey": ${response.body}');
+
+      // 200 = accepted, 400 = format accepted but content invalid.
+      return response.statusCode == 200 || response.statusCode == 400;
+    } catch (e) {
+      debugPrint('Validation probe threw for "$fileKey": $e');
+      return false;
+    }
+  }
+
   /// Converts a map of file names to content into a map of file keys to content
   ///
   /// [fileNameToContent] - Map from file names (with extensions) to content
@@ -321,152 +457,67 @@ class FlutterFlowApiService {
     return fileKeyToContent;
   }
 
-  /// Fetches the authoritative list of all partitioned file names (keys)
-  /// from FlutterFlow for the specified project.
-  ///
-  /// This is the OFFICIAL way to determine which file keys are valid for
-  /// a project. According to FlutterFlow documentation: "Before you read
-  /// or update project files, you need to know what YAML files are available."
-  ///
-  /// Returns a list of file keys that can be used with validateProjectYaml
-  /// and updateProjectByYaml endpoints.
-  ///
-  /// Throws FlutterFlowApiException if the request fails.
-  static Future<List<String>> listPartitionedFileNames({
-    required String projectId,
-    required String apiToken,
-  }) async {
-    if (projectId.isEmpty || apiToken.isEmpty) {
-      throw ArgumentError('Project ID and API token cannot be empty');
-    }
-
-    // Use GET with query parameter (not POST with body)
-    final uri = Uri.parse('$baseUrl/listPartitionedFileNames').replace(
-      queryParameters: {'projectId': projectId},
-    );
-    debugPrint('Fetching partitioned file names from: $uri');
-
-    try {
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $apiToken',
-          'Accept': 'application/json',
-        },
-      );
-
-      debugPrint('List files response status: ${response.statusCode}');
-      debugPrint('List files response body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-
-        // The API returns { "fileNames": ["file1", "file2", ...] }
-        if (data is Map<String, dynamic> && data['fileNames'] is List) {
-          final fileNames = (data['fileNames'] as List)
-              .map((name) => name.toString())
-              .toList();
-          debugPrint('Retrieved ${fileNames.length} file names from FlutterFlow');
-          return fileNames;
-        }
-
-        throw FlutterFlowApiException(
-          endpoint: uri.toString(),
-          statusCode: response.statusCode,
-          body: response.body,
-          message: 'Unexpected response format: missing or invalid fileNames array',
-        );
-      }
-
-      throw buildApiException(
-        endpoint: uri.toString(),
-        response: response,
-      );
-    } catch (e) {
-      if (e is FlutterFlowApiException) {
-        rethrow;
-      }
-
-      debugPrint('Error fetching partitioned file names: $e');
-      throw FlutterFlowApiException(
-        endpoint: uri.toString(),
-        statusCode: null,
-        body: null,
-        message: 'Network error while fetching file names: $e',
-        isNetworkError: true,
-      );
-    }
-  }
-
-  /// Resolves a local file path to its authoritative FlutterFlow file key
-  /// by querying the project's file list.
-  ///
-  /// This function:
-  /// 1. Fetches the complete list of file keys from FlutterFlow
-  /// 2. Normalizes the provided file path
-  /// 3. Finds the best matching key from the authoritative list
-  ///
-  /// Returns the exact file key to use with the API, or null if no match found.
+  /// Resolves a local file path to its FlutterFlow file key by empirically
+  /// probing candidate formats against the validation endpoint. This avoids
+  /// listPartitionedFileNames entirely.
   static Future<String?> resolveFileKey({
     required String projectId,
     required String apiToken,
     required String filePath,
     String? yamlContent,
   }) async {
-    // Get the authoritative list from FlutterFlow
-    final authoritativeKeys = await listPartitionedFileNames(
+    return resolveFileKeyEmpirical(
       projectId: projectId,
       apiToken: apiToken,
+      filePath: filePath,
+      yamlContent: yamlContent,
+    );
+  }
+
+  /// NEW APPROACH: probe candidate file keys until the validation endpoint
+  /// accepts the format (HTTP 200 or 400). Logs every attempt with payload
+  /// and response for visibility.
+  static Future<String?> resolveFileKeyEmpirical({
+    required String projectId,
+    required String apiToken,
+    required String filePath,
+    String? yamlContent,
+  }) async {
+    final cacheKey = _cacheKeyForPath(filePath);
+    final cached = _fileKeyCache[cacheKey];
+    if (cached != null) {
+      debugPrint('Using cached file key for "$filePath": "$cached"');
+      return cached;
+    }
+
+    final candidates = _prioritizeCandidates(
+      buildFileKeyCandidates(filePath: filePath, yamlContent: yamlContent),
+      filePath,
     );
 
-    // Normalize the file path
-    final normalized = _normalizeArchivePath(filePath);
-    final withoutExt = _stripYamlExtension(normalized);
+    debugPrint('Testing ${candidates.length} candidate keys for: $filePath');
 
-    // Try to find exact match first (without extension)
-    if (authoritativeKeys.contains(withoutExt)) {
-      debugPrint('Resolved "$filePath" -> "$withoutExt" (exact match)');
-      return withoutExt;
-    }
+    for (final candidate in candidates) {
+      debugPrint('Testing candidate: "$candidate"');
 
-    // Try to find exact match with extension
-    final withExt = _ensureYamlExtension(withoutExt);
-    if (authoritativeKeys.contains(withExt)) {
-      debugPrint('Resolved "$filePath" -> "$withExt" (exact match with extension)');
-      return withExt;
-    }
+      final works = await _testFileKey(
+        projectId: projectId,
+        apiToken: apiToken,
+        fileKey: candidate,
+        content: yamlContent ?? '',
+      );
 
-    // Try to match by basename (for cases where archive path differs)
-    final basename = withoutExt.split('/').last;
-    for (final key in authoritativeKeys) {
-      if (key.endsWith('/$basename') || key == basename) {
-        debugPrint('Resolved "$filePath" -> "$key" (basename match)');
-        return key;
+      if (works) {
+        debugPrint('✅ Working key found: "$candidate"');
+        _fileKeyCache[cacheKey] = candidate;
+        _rememberFormatPreference(filePath, candidate);
+        return candidate;
+      } else {
+        debugPrint('❌ Key failed: "$candidate"');
       }
     }
 
-    // Try to infer from YAML content if provided
-    if (yamlContent != null) {
-      final inferred = YamlFileUtils.inferFileKeyFromContent(yamlContent);
-      if (inferred != null) {
-        final inferredNormalized = _stripYamlExtension(_normalizeArchivePath(inferred));
-        if (authoritativeKeys.contains(inferredNormalized)) {
-          debugPrint('Resolved "$filePath" -> "$inferredNormalized" (YAML content match)');
-          return inferredNormalized;
-        }
-      }
-    }
-
-    // Log available keys for debugging
-    debugPrint('Failed to resolve "$filePath"');
-    debugPrint('Available keys matching pattern:');
-    final pathParts = withoutExt.split('/');
-    for (final key in authoritativeKeys) {
-      if (pathParts.any((part) => key.contains(part))) {
-        debugPrint('  - $key');
-      }
-    }
-
+    debugPrint('No working file key found for: $filePath');
     return null;
   }
 
@@ -488,6 +539,8 @@ class FlutterFlowApiService {
     }
   }
 }
+
+enum _FileKeyScope { root, nested }
 
 class FlutterFlowApiException implements Exception {
   final int? statusCode;
