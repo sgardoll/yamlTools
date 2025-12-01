@@ -304,6 +304,24 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
               'Response: ${response.body}';
         });
       }
+    } on FlutterFlowApiException catch (e) {
+      debugPrint('Validation error: $e');
+      String message;
+      if (e.isNetworkError) {
+        message =
+            '🌐 Network error: Unable to connect to FlutterFlow API. Check your internet connection.';
+      } else if (e.statusCode == 401) {
+        message =
+            '🔑 Authentication failed. Please check your API token.';
+      } else if (e.statusCode == 403) {
+        message = '🚫 Access denied. Check your API token permissions.';
+      } else {
+        message = e.message;
+      }
+      setState(() {
+        _isValid = false;
+        _validationError = message;
+      });
     } catch (e) {
       debugPrint('Validation error: $e');
       setState(() {
