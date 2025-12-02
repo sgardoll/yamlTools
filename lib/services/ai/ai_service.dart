@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:yaml/yaml.dart';
 import 'ai_models.dart';
 import 'openai_client.dart';
 
@@ -25,7 +26,11 @@ class AIService {
       },
       {
         'role': 'user',
-        'content': _buildUserMessage(request.userPrompt, contextData),
+        'content': _buildUserMessage(
+          request.userPrompt,
+          contextData,
+          request.projectFiles,
+        ),
       }
     ];
 
@@ -149,13 +154,102 @@ RESPONSE FORMAT (JSON ONLY):
 ''';
   }
 
-  String _buildUserMessage(String prompt, String contextData) {
-    return '''
-Request: $prompt
+  @visibleForTesting
+  String buildUserMessageForTest(
+    String prompt,
+    String contextData,
+    Map<String, String> projectFiles,
+  ) {
+    return _buildUserMessage(prompt, contextData, projectFiles);
+  }
 
-INPUT CONTEXT:
+  String _buildUserMessage(
+    String prompt,
+    String contextData,
+    Map<String, String> projectFiles,
+  ) {
+    final projectInfo = _extractProjectMetadata(projectFiles);
+
+    return '''
+# Task: $prompt
+
+## Context
 $contextData
+
+## Project Information
+$projectInfo
+
+## Specific Changes Required
+User Request: $prompt
+Instructions: Derive the specific widget targets, properties, and constraints from the User Request.
+
+## Required Output
+You must return a JSON object with the following structure:
+{
+  "summary": "Brief description including a Validation Report and Pre-Modification Analysis",
+  "modifications": [
+    {
+      "filePath": "exact/file/path.yaml",
+      "newContent": "<FULL_UPDATED_YAML_CONTENT>",
+      "isNewFile": false,
+      "touchedPaths": ["modified.path"]
+    }
+  ]
+}
+
+## Edge Cases to Handle
+1. **Components**: Do not modify widgets inside components unless explicitly requested.
+2. **Collections**: Be careful when modifying widgets inside ListView or GridView.
+3. **Ambiguity**: If the request is ambiguous, make a reasonable assumption or skip.
+4. **Empty Pages**: Handle pages with no widgets gracefully.
+
+## Failure Scenarios
+- If validation fails, report it in the summary.
+- Do not apply partial changes that break the project.
 ''';
+  }
+
+  String _extractProjectMetadata(Map<String, String> projectFiles) {
+    final pages = <String>{};
+    final components = <String>{};
+
+    projectFiles.forEach((path, content) {
+      if (path.startsWith('page/') || path.startsWith('archive_pages/')) {
+        final name = _extractNameFromYaml(content) ??
+            path.split('/').last.replaceAll('.yaml', '');
+        pages.add(name);
+      } else if (path.startsWith('component/') ||
+          path.startsWith('archive_components/')) {
+        final name = _extractNameFromYaml(content) ??
+            path.split('/').last.replaceAll('.yaml', '');
+        components.add(name);
+      }
+    });
+
+    final buffer = StringBuffer();
+    buffer.writeln("- **Detected Pages**: ${pages.join(', ')}");
+    if (components.isNotEmpty) {
+      buffer.writeln("- **Detected Components**: ${components.join(', ')}");
+    }
+    return buffer.toString();
+  }
+
+  String? _extractNameFromYaml(String content) {
+    try {
+      final doc = loadYaml(content);
+      if (doc is YamlMap) {
+        // Check for 'name'
+        if (doc.containsKey('name')) return doc['name'].toString();
+        // Check for 'identifier: { name: ... }'
+        if (doc['identifier'] is YamlMap &&
+            doc['identifier'].containsKey('name')) {
+          return doc['identifier']['name'].toString();
+        }
+      }
+    } catch (_) {
+      // Ignore parsing errors
+    }
+    return null;
   }
 
   ProposedChange _parseResponse(
