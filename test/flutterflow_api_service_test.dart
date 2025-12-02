@@ -52,7 +52,8 @@ void main() {
       );
     });
 
-    test('buildFileKeyCandidates should include yaml-derived and extension keys',
+    test(
+        'buildFileKeyCandidates should prefer yaml-derived keys and include archive variants',
         () {
       const content = '''
 page:
@@ -65,8 +66,11 @@ page:
         yamlContent: content,
       );
 
-      expect(candidates, contains('page/id-Scaffold_hur6kpbk'));
-      expect(candidates, contains('page/id-Scaffold_hur6kpbk.yaml'));
+      expect(candidates.first, equals('page/id-Scaffold_hur6kpbk'));
+      expect(candidates[1], equals('page/id-Scaffold_hur6kpbk.yaml'));
+      expect(candidates, contains('archive_page/id-Scaffold_hur6kpbk'));
+      expect(
+          candidates, contains('archive_page/id-Scaffold_hur6kpbk.yaml'));
     });
   });
 }

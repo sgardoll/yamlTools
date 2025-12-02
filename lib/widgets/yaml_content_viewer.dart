@@ -170,7 +170,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             'Auto-corrected YAML key from "${fixed.previousKey}" to "${fixed.expectedKey}" for ${widget.filePath}');
       }
 
-      // Use the OFFICIAL method: resolve file key from FlutterFlow's authoritative list
+      // Empirically resolve the file key by probing validation endpoint candidates
       final fileKey = await FlutterFlowApiService.resolveFileKey(
         projectId: widget.projectId,
         apiToken: apiToken,
@@ -193,107 +193,51 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
 
       debugPrint('Validating file: ${widget.filePath} -> resolved key: "$fileKey"');
 
-      final apiUrl = '${FlutterFlowApiService.baseUrl}/validateProjectYaml';
+      debugPrint('Sending validation request for key "$fileKey" using Zip approach');
 
-      // Create request payload
-      final requestBody = json.encode({
-        'projectId': widget.projectId,
-        'fileKey': fileKey,
-        'fileContent': content,
-      });
+      try {
+        final result = await FlutterFlowApiService.validateProjectYaml(
+          projectId: widget.projectId,
+          apiToken: apiToken,
+          fileKeyToContent: {fileKey: content},
+        );
 
-      debugPrint('Sending validation request to: $apiUrl with key "$fileKey"');
-
-      final response = await http.post(
-        Uri.parse(apiUrl),
-        headers: {
-          'Authorization': 'Bearer $apiToken',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          // Add cache control to prevent caching issues
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-        },
-        body: requestBody,
-      );
-
-      debugPrint('Validation response status: ${response.statusCode}');
-      debugPrint('Validation response body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final validationErrors = _extractValidationErrors(data);
-        if (data['success'] == true && validationErrors.isEmpty) {
+        if (result['valid'] == true) {
           setState(() {
             _isValid = true;
             _validationError = null;
             _lastValidatedFileKey = fileKey;
           });
         } else {
-          final errorMsg = validationErrors.isNotEmpty
-              ? validationErrors.join('\n')
-              : (data['error'] ?? data['message'] ?? 'Invalid YAML format')
-                  .toString();
-          final keyMismatch = _firstKeyMismatch(validationErrors);
-          setState(() {
-            _isValid = false;
-            _validationError = keyMismatch ??
-                _formatValidationMessage(
-                  errorMsg,
-                  yamlContent: content,
-                  currentFilePath: widget.filePath,
-                );
-          });
-        }
-      } else if (response.statusCode == 400) {
-        // Parse detailed validation errors
-        try {
-          final errorData = json.decode(response.body);
-          final extracted = _extractValidationErrors(errorData);
-          final combined = [
-            if (errorData['error'] != null) errorData['error'].toString(),
-            if (errorData['message'] != null) errorData['message'].toString(),
-            if (extracted.isNotEmpty) extracted.join('\n'),
-          ].where((e) => e.trim().isNotEmpty).join('\n');
-          final keyMismatch = _firstKeyMismatch(extracted);
-          setState(() {
-            _isValid = false;
-            _validationError = keyMismatch ??
-                _formatValidationMessage(
-                  combined.isEmpty ? response.body : combined,
-                  yamlContent: content,
-                  currentFilePath: widget.filePath,
-                );
-          });
-        } catch (e) {
+          final errors = (result['errors'] as List?)?.cast<String>() ?? [];
+          final errorMsg = errors.isNotEmpty ? errors.join('\n') : 'Validation failed';
+
           setState(() {
             _isValid = false;
             _validationError = _formatValidationMessage(
-              'Validation failed (HTTP ${response.statusCode}): ${response.body}',
+              errorMsg,
               yamlContent: content,
               currentFilePath: widget.filePath,
             );
           });
         }
-      } else if (response.statusCode == 401) {
-        setState(() {
-          _isValid = false;
-          _validationError =
-              '🔑 Authentication failed. Please check your API token.';
-        });
-      } else if (response.statusCode == 403) {
-        setState(() {
-          _isValid = false;
-          _validationError =
-              '🚫 Access denied. Check your API token permissions.';
-        });
-      } else {
-        setState(() {
-          _isValid = false;
-          _validationError =
-              '🌐 Server error (${response.statusCode}).\n'
-              'Response: ${response.body}';
-        });
+      } catch (e) {
+        if (e is FlutterFlowApiException) {
+           if (e.statusCode == 401) {
+             setState(() {
+               _isValid = false;
+               _validationError = '🔑 Authentication failed. Please check your API token.';
+             });
+             return;
+           } else if (e.statusCode == 403) {
+             setState(() {
+               _isValid = false;
+               _validationError = '🚫 Access denied. Check your API token permissions.';
+             });
+             return;
+           }
+        }
+        rethrow;
       }
     } catch (e) {
       debugPrint('Validation error: $e');
@@ -354,7 +298,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             'Auto-corrected YAML key from "${fixed.previousKey}" to "${fixed.expectedKey}" for $effectiveFilePath');
       }
 
-      // Use the OFFICIAL method: resolve file key from FlutterFlow's authoritative list
+      // Empirically resolve the file key by probing validation endpoint candidates
       // If we have a previously validated key, try to use it; otherwise resolve fresh
       String? fileKey = _lastValidatedFileKey;
 
