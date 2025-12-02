@@ -222,20 +222,25 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           });
         }
       } catch (e) {
-        if (e is FlutterFlowApiException) {
-           if (e.statusCode == 401) {
-             setState(() {
-               _isValid = false;
-               _validationError = '🔑 Authentication failed. Please check your API token.';
-             });
-             return;
-           } else if (e.statusCode == 403) {
-             setState(() {
-               _isValid = false;
-               _validationError = '🚫 Access denied. Check your API token permissions.';
-             });
-             return;
-           }
+        if (e is FlutterFlowApiException && e.statusCode != null && e.statusCode! >= 400 && e.statusCode! < 500) {
+           final bodyText = (e.body ?? e.message);
+           final formatted = _formatValidationMessage(
+             bodyText,
+             yamlContent: content,
+             currentFilePath: widget.filePath,
+           );
+
+           setState(() {
+             _isValid = false;
+             // If we can format it nicely (e.g. line/col error), do so.
+             // Otherwise show the raw message from the API.
+             if (_isFormattedValidationMessage(bodyText, formatted)) {
+               _validationError = formatted;
+             } else {
+               _validationError = e.message.isNotEmpty ? e.message : 'Validation failed with status ${e.statusCode}';
+             }
+           });
+           return;
         }
         rethrow;
       }
@@ -358,15 +363,6 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         if (e.isNetworkError) {
           userFriendlyError =
               '🌐 Network Error: Unable to reach FlutterFlow servers. Check your internet connection.';
-        } else if (status == 401) {
-          userFriendlyError =
-              '🔑 Authentication Error: Invalid API token. Please check your credentials.';
-        } else if (status == 403) {
-          userFriendlyError =
-              '🚫 Permission Error: Your API token doesn\'t have write access to this project.';
-        } else if (status == 404) {
-          userFriendlyError =
-              '🔍 Project Not Found: Check your project ID or API token.';
         } else if (status != null && status >= 400 && status < 500) {
           final bodyText = (e.body ?? e.message);
           final formatted = _formatValidationMessage(
@@ -374,18 +370,14 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             yamlContent: content,
             currentFilePath: effectiveFilePath,
           );
-          final detailed = _composeUpdateErrorMessage(
-            filePath: effectiveFilePath,
-            attemptedFileKey: attemptedFileKey,
-            exception: e,
-            yamlContent: content,
-          );
+
           // Use the specialized validation formatter when it provides
-          // location details; otherwise surface the detailed API message.
+          // location details. Otherwise, use the API message directly
+          // without adding technical details like endpoint/status.
           if (_isFormattedValidationMessage(bodyText, formatted)) {
             userFriendlyError = formatted;
           } else {
-            userFriendlyError = detailed;
+            userFriendlyError = e.message.isNotEmpty ? e.message : 'Update failed with status $status';
           }
         } else {
           userFriendlyError = _composeUpdateErrorMessage(
