@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:archive/archive.dart';
 import 'yaml_file_utils.dart';
 
 class FlutterFlowApiService {
@@ -47,6 +48,104 @@ class FlutterFlowApiService {
     );
   }
 
+  /// Helper method to create a base64 encoded zip from file content map
+  static String _createProjectZip(Map<String, String> fileKeyToContent) {
+    final archive = Archive();
+
+    fileKeyToContent.forEach((key, content) {
+      // Ensure key has .yaml extension for the zip entry
+      String entryName = key;
+      if (!entryName.toLowerCase().endsWith('.yaml') &&
+          !entryName.toLowerCase().endsWith('.yml')) {
+        entryName = '$entryName.yaml';
+      }
+
+      final bytes = utf8.encode(content);
+      final file = ArchiveFile(entryName, bytes.length, bytes);
+      archive.addFile(file);
+    });
+
+    final encoder = ZipEncoder();
+    final encodedBytes = encoder.encode(archive);
+
+    if (encodedBytes == null) {
+      throw Exception('Failed to encode zip archive');
+    }
+
+    return base64Encode(encodedBytes);
+  }
+
+  /// Validates the YAML files in a FlutterFlow project using the Zip approach.
+  ///
+  /// [projectId] - The FlutterFlow project ID
+  /// [apiToken] - The API token for authentication
+  /// [fileKeyToContent] - A map from file key to YAML content
+  ///
+  /// Returns a Map with validation results:
+  /// {
+  ///   'valid': bool,
+  ///   'errors': List<String>,
+  ///   'warnings': List<String>
+  /// }
+  static Future<Map<String, dynamic>> validateProjectYaml({
+    required String projectId,
+    required String apiToken,
+    required Map<String, String> fileKeyToContent,
+  }) async {
+    if (projectId.isEmpty || apiToken.isEmpty) {
+      throw ArgumentError('Project ID and API token cannot be empty');
+    }
+
+    final yamlContent = _createProjectZip(fileKeyToContent);
+
+    final body = jsonEncode({
+      'projectId': projectId,
+      'yamlContent': yamlContent,
+    });
+
+    try {
+      final uri = Uri.parse('$baseUrl/validateProjectYaml');
+      debugPrint('Validating project YAML via: $uri');
+
+      final response = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $apiToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: body,
+      );
+
+      debugPrint('Validation response status: ${response.statusCode}');
+      debugPrint('Validation response body: ${response.body}');
+
+      final responseData = jsonDecode(response.body);
+
+      if (responseData['success'] == true) {
+        return {
+          'valid': true,
+          'errors': <String>[],
+          'warnings': <String>[],
+        };
+      } else {
+        final reason = responseData['reason'] as String? ?? 'Validation failed';
+        return {
+          'valid': false,
+          'errors': [reason],
+          'warnings': <String>[],
+        };
+      }
+    } catch (e) {
+      debugPrint('Error validating project YAML: $e');
+      throw FlutterFlowApiException(
+        endpoint: baseUrl,
+        message: 'Network error while validating project YAML: $e',
+        isNetworkError: true,
+      );
+    }
+  }
+
   /// Updates the YAML files in a FlutterFlow project
   ///
   /// [projectId] - The FlutterFlow project ID
@@ -67,17 +166,16 @@ class FlutterFlowApiService {
       throw ArgumentError('File content map cannot be empty');
     }
 
+    // Create Base64 Encoded Zip
+    final yamlContent = _createProjectZip(fileKeyToContent);
+
     final body = jsonEncode({
       'projectId': projectId,
-      'fileKeyToContent': fileKeyToContent,
+      'yamlContent': yamlContent,
     });
 
     debugPrint('Updating project YAML for project: $projectId');
     debugPrint('Files to update: ${fileKeyToContent.keys.join(', ')}');
-    // Debug: print the actual file key to content mapping
-    fileKeyToContent.forEach((key, content) {
-      print('File key: "$key" -> Content length: ${content.length} chars');
-    });
 
     try {
       // Primary endpoint per updated FlutterFlow API docs
@@ -103,7 +201,7 @@ class FlutterFlowApiService {
       }
 
       // If the primary endpoint returns a client error (4xx), it's very likely
-      // a validation error. Do NOT fall back and mask the message. Surface it.
+      // a validation error. Surface it.
       if (primaryResponse.statusCode >= 400 && primaryResponse.statusCode < 500) {
         throw buildApiException(
           endpoint: primaryUri.toString(),
@@ -112,63 +210,10 @@ class FlutterFlowApiService {
         );
       }
 
-      // Fallback PUT endpoint for older API paths
-      final fallbackPutUri = Uri.parse('$baseUrl/projectYaml');
-      debugPrint('Primary endpoint failed. Trying fallback endpoint: $fallbackPutUri (method: PUT)');
-
-      final fallbackPutResponse = await http.put(
-        fallbackPutUri,
-        headers: {
-          'Authorization': 'Bearer $apiToken',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: body,
-      );
-
-      debugPrint('Fallback PUT response status: ${fallbackPutResponse.statusCode}');
-      debugPrint('Fallback PUT response body: ${fallbackPutResponse.body}');
-
-      if (fallbackPutResponse.statusCode == 200) {
-        debugPrint('Successfully updated project YAML via fallback PUT endpoint');
-        return true;
-      }
-
-      if (fallbackPutResponse.statusCode >= 400 && fallbackPutResponse.statusCode < 500) {
-        throw buildApiException(
-          endpoint: fallbackPutUri.toString(),
-          response: fallbackPutResponse,
-          note: 'Fallback PUT endpoint returned client error.',
-        );
-      }
-
-      // Legacy POST endpoint for even older API paths
-      final legacyUri = Uri.parse('$baseUrl/updateProjectYaml');
-      debugPrint('Fallback PUT failed. Trying legacy endpoint: $legacyUri');
-
-      final legacyResponse = await http.post(
-        legacyUri,
-        headers: {
-          'Authorization': 'Bearer $apiToken',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: body,
-      );
-
-      debugPrint('Legacy update response status: ${legacyResponse.statusCode}');
-      debugPrint('Legacy update response body: ${legacyResponse.body}');
-
-      if (legacyResponse.statusCode == 200) {
-        debugPrint('Successfully updated project YAML via legacy endpoint');
-        return true;
-      }
-
       throw buildApiException(
-        endpoint: legacyUri.toString(),
-        response: legacyResponse,
-        note:
-            'All endpoints failed. See body for the most recent error. Primary and fallback statuses were ${primaryResponse.statusCode} and ${fallbackPutResponse.statusCode}.',
+        endpoint: primaryUri.toString(),
+        response: primaryResponse,
+        note: 'Update failed with status ${primaryResponse.statusCode}',
       );
     } catch (e) {
       // If we already built a structured API exception, just bubble it up.
