@@ -36,15 +36,35 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('FlutterFlowApiService', () {
-    test('converts file names to API keys', () {
+    test('converts file names to API keys across folders', () {
       final result = FlutterFlowApiService.convertFileNamesToKeys({
         'archive_pages/home.yaml': 'home',
         'theme/colors.yml': 'colors',
+        'archive_custom_actions/auth.yaml': 'auth',
+        'custom_actions/branch.yaml': 'branch',
+        'pages/id-Scaffold_123/page-widget-tree-outline.yaml': 'outline',
         'complete_raw.yaml': 'raw',
       });
 
-      expect(result.keys, containsAll(['page/home', 'theme/colors', 'complete_raw']));
+      expect(
+        result.keys,
+        containsAll([
+          'page/home',
+          'customAction/auth',
+          'customAction/branch',
+          'theme/colors',
+          'page/id-Scaffold_123/page-widget-tree-outline',
+          'complete_raw',
+        ]),
+      );
       expect(result['page/home'], 'home');
+      expect(result['customAction/auth'], 'auth');
+      expect(result['customAction/branch'], 'branch');
+      expect(result['theme/colors'], 'colors');
+      expect(
+        result['page/id-Scaffold_123/page-widget-tree-outline'],
+        'outline',
+      );
       expect(result['complete_raw'], 'raw');
     });
 
@@ -120,6 +140,42 @@ page:
       expect(normalized.canonicalPath, 'page/home.yaml');
       expect(normalized.apiFileKey, 'page/home');
       expect(normalized.expectedYamlKey, 'home');
+    });
+
+    test('normalizes archive_custom_actions prefix to customAction', () {
+      final normalized = YamlFileUtils.normalizeFilePath(
+        'archive_custom_actions/id-login.yaml',
+      );
+
+      expect(normalized.canonicalPath, 'customAction/id-login.yaml');
+      expect(normalized.apiFileKey, 'customAction/id-login');
+      expect(normalized.expectedYamlKey, 'login');
+    });
+
+    test('infers theme and component file paths from YAML content', () {
+      const themeYaml = '''
+theme:
+  key: theme
+  name: App Theme
+''';
+      const componentYaml = '''
+component:
+  key: button_primary
+  name: Primary Button
+''';
+
+      final themePath = YamlFileUtils.inferFilePathFromContent(themeYaml);
+      final themeKey = YamlFileUtils.inferFileKeyFromContent(themeYaml);
+
+      final componentPath =
+          YamlFileUtils.inferFilePathFromContent(componentYaml);
+      final componentKey =
+          YamlFileUtils.inferFileKeyFromContent(componentYaml);
+
+      expect(themePath, 'theme/theme.yaml');
+      expect(themeKey, 'theme/theme');
+      expect(componentPath, 'component/button_primary.yaml');
+      expect(componentKey, 'component/button_primary');
     });
   });
 
