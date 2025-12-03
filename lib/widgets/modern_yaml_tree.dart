@@ -249,7 +249,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
     // Build unsaved section
     final List<TreeNode> unsavedNodes = [];
-    for (final filePath in filePaths) {
+    for (final filePath in regularFilePaths) {
       if (_isUnsaved(filePath)) {
         final filename = filePath.split('/').last;
         final type = _determineNodeType(filename, true);
@@ -282,7 +282,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
       return _searchQuery.isEmpty || name.toLowerCase().contains(_searchQuery);
     }
 
-    for (final filePath in filePaths) {
+    for (final filePath in regularFilePaths) {
       List<String> pathParts;
       String cleanFilePath = filePath;
 
@@ -307,8 +307,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         final nodeType = _determineNodeType(pathPart, isLeaf);
         final friendlyName = _getFriendlyName(pathPart, filePath, nodeType);
 
-        currentPath =
-            currentPath.isEmpty ? pathPart : '$currentPath/$pathPart';
+        currentPath = currentPath.isEmpty ? pathPart : '$currentPath/$pathPart';
 
         TreeNode? existingNode = pathToNode[currentPath];
         if (existingNode == null) {
