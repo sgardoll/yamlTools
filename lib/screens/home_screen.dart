@@ -1512,6 +1512,32 @@ class _HomeScreenState extends State<HomeScreen> {
                             );
                           },
                         ),
+                        if (_isLoading)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: AppTheme.panelDecoration,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Loading project... Hang tight.',
+                                    style: AppTheme.bodyMedium.copyWith(
+                                      color: AppTheme.textSecondary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         if (_projectsError != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 12),
@@ -1543,6 +1569,34 @@ class _HomeScreenState extends State<HomeScreen> {
                         label: const Text('Clear API & AI tokens'),
                       ),
                     ),
+                    if (hasApiKey)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Recently updated projects',
+                              style: AppTheme.bodyMedium.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              decoration: AppTheme.panelDecoration,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: RecentProjectsWidget(
+                                  onProjectSelected: _handleProjectSelected,
+                                  showHeader: false,
+                                  maxItems: 3,
+                                  enableSearch: true,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ],
