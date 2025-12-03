@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:yaml/yaml.dart';
 import '../theme/app_theme.dart';
 import 'dart:collection';
 
@@ -61,19 +62,37 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   // Track processed file paths to avoid duplicates
   Set<String> _processedFiles = {};
 
+  final TextEditingController _searchController = TextEditingController();
+  Map<String, String> _pageDisplayNames = {};
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
+    _extractPageNames();
     _buildTree();
     if (widget.expandedNodes != null) {
       _expandedNodes = Set.from(widget.expandedNodes!);
     }
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.toLowerCase();
+        _buildTree();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
   void didUpdateWidget(ModernYamlTree oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.yamlFiles != widget.yamlFiles) {
+      _extractPageNames();
       _buildTree();
     }
     if (oldWidget.expandedNodes != widget.expandedNodes) {
@@ -81,6 +100,80 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         _expandedNodes = Set.from(widget.expandedNodes!);
       }
     }
+  }
+
+  void _extractPageNames() {
+    _pageDisplayNames.clear();
+    widget.yamlFiles.forEach((path, content) {
+      String cleanPath = path;
+      if (path.startsWith('archive_')) {
+        cleanPath = path.replaceFirst('archive_', '');
+      }
+
+      // Look for page definition files: page/id-Scaffold_XXX/id-Scaffold_XXX.yaml
+      final parts = cleanPath.split('/');
+      // Expected structure: [page, id-Scaffold_XXX, id-Scaffold_XXX.yaml]
+      if (parts.length >= 3 &&
+          parts[0] == 'page' &&
+          parts[1].startsWith('id-Scaffold')) {
+        // Check if this is the main file for the page folder
+        final folderName = parts[1];
+        final fileName = parts.last;
+        final simpleFileName = fileName.endsWith('.yaml')
+            ? fileName.substring(0, fileName.length - 5)
+            : fileName;
+
+        if (folderName == simpleFileName) {
+          try {
+            final yaml = loadYaml(content);
+            if (yaml is YamlMap && yaml['name'] != null) {
+              _pageDisplayNames[folderName] = yaml['name'].toString();
+            }
+          } catch (e) {
+            // ignore parse errors
+          }
+        }
+      }
+    });
+  }
+
+  String _getFriendlyName(String rawName, String? fullPath, NodeType type) {
+    if (type == NodeType.folder &&
+        rawName.startsWith('id-Scaffold') &&
+        _pageDisplayNames.containsKey(rawName)) {
+      final pageName = _pageDisplayNames[rawName];
+      return '$pageName ($rawName)';
+    }
+
+    if (rawName == 'page-widget-tree-outline') {
+      return 'Widget Tree Outline';
+    }
+
+    // Specific file mappings
+    if (rawName == 'admob.yaml') return 'AdMob';
+    if (rawName == 'app-details.yaml') return 'App Details';
+    if (rawName == 'app_bar.yaml') return 'App Bar';
+    if (rawName == 'folders.yaml') return 'Folders';
+    if (rawName == 'nav_bar.yaml') return 'Nav Bar';
+    if (rawName == 'material_theme_settings.yaml')
+      return 'Material Theme Settings';
+    if (rawName == 'environment_settings.yaml') return 'Environment Settings';
+
+    // Widget files: id-Type_Hash.yaml -> Type (Type_Hash)
+    if (type == NodeType.file || type == NodeType.leaf) {
+      final nameWithoutExt = rawName.endsWith('.yaml')
+          ? rawName.substring(0, rawName.length - 5)
+          : rawName;
+      if (nameWithoutExt.startsWith('id-')) {
+        final parts = nameWithoutExt.substring(3).split('_');
+        if (parts.length >= 2) {
+          final widgetType = parts[0];
+          return '$widgetType (${nameWithoutExt.substring(3)})';
+        }
+      }
+    }
+
+    return rawName;
   }
 
   void _buildTree() {
@@ -91,8 +184,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     Set<String> processedDisplayNames = {};
 
     // Process all files from the yamlFiles map
-    final List<String> filePaths = widget.yamlFiles.keys.toList()
-      ..sort(); // Sort for consistent display order
+    final List<String> filePaths = widget.yamlFiles.keys.toList()..sort();
 
     // Group files by path to create a tree structure
     final pathToNode = HashMap<String, TreeNode>();
@@ -100,103 +192,129 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     // Root node is already created
     pathToNode[''] = _rootNode;
 
-    // First pass: Process hierarchical files (those with paths)
-    for (String filePath in filePaths) {
-      // Skip if we've already processed this file
-      if (_processedFiles.contains(filePath)) continue;
+    // Helper to check if a node matches search query
+    bool matchesSearch(String name) {
+      return _searchQuery.isEmpty || name.toLowerCase().contains(_searchQuery);
+    }
 
-      // Skip system files, we'll process them separately
+    // Track matching nodes to ensure parents are kept
+    Set<TreeNode> matchingNodes = {};
+
+    // Temporary storage for built nodes to apply search filtering later
+    // Actually, it's easier to build the full tree and then prune or just
+    // only add nodes that match (and their ancestors).
+    // Let's modify the build process to build full structure but with friendly names,
+    // and then we can maybe filter visualization or just filter during build.
+
+    // Given the structure, we need to handle "skipping" nodes (like 'node' folder).
+    // This is easier if we process path parts carefully.
+
+    for (String filePath in filePaths) {
+      // Skip system files
       if (filePath.contains('complete_raw.yaml') ||
           filePath.contains('raw_project.yaml')) {
         continue;
       }
 
-      // Split the path into components
       List<String> pathParts = [];
+      String cleanFilePath = filePath;
 
-      // Special handling for archive files
       if (filePath.startsWith('archive_')) {
-        // Remove the 'archive_' prefix for display
-        String cleanPath = filePath.replaceFirst('archive_', '');
-        pathParts = cleanPath.split('/');
+        cleanFilePath = filePath.replaceFirst('archive_', '');
+        pathParts = cleanFilePath.split('/');
       } else {
         pathParts = filePath.split('/');
       }
 
-      // Only process hierarchical files (files with multiple path components)
-      if (pathParts.length > 1) {
-        // Mark as processed only when we actually process it
-        _processedFiles.add(filePath);
+      TreeNode currentNode = _rootNode;
+      String currentPath = '';
 
-        TreeNode currentNode = _rootNode;
+      // We need to look ahead/behind to handle "skipping" folders
+      // For "page-widget-tree-outline/node/...", we want to skip "node".
 
-        // Build the path in the tree
-        String currentPath = '';
-        for (int i = 0; i < pathParts.length; i++) {
-          final pathPart = pathParts[i];
-          final isLeaf = (i == pathParts.length - 1);
+      for (int i = 0; i < pathParts.length; i++) {
+        String pathPart = pathParts[i];
+        final isLeaf = (i == pathParts.length - 1);
+        final originalPathPart = pathPart; // Keep raw for path reconstruction
 
-          // Update current path
-          currentPath =
-              currentPath.isEmpty ? pathPart : '$currentPath/$pathPart';
+        // Special handling: Skip 'node' folder if parent was 'page-widget-tree-outline'
+        // To do this, we need to know the PREVIOUS part was 'page-widget-tree-outline'.
+        if (pathPart == 'node' &&
+            i > 0 &&
+            pathParts[i - 1] == 'page-widget-tree-outline') {
+          // Skip this part, don't update currentPath, just continue loop
+          // But we need to make sure the NEXT iteration continues from the SAME currentNode
+          continue;
+        }
 
-          // Check if this node already exists
-          TreeNode? existingNode = pathToNode[currentPath];
-          if (existingNode == null) {
-            // Create new node
-            final nodeType = _determineNodeType(pathPart, isLeaf);
-            final newNode = TreeNode(
-              name: pathPart,
-              type: nodeType,
-              filePath: isLeaf ? filePath : null,
-            );
+        // Configuration Files handling
+        // If we have "configuration_files" folder or similar, we might want to rename it.
+        // Assuming "configuration_files" is literal in the path.
 
-            currentNode.children.add(newNode);
-            pathToNode[currentPath] = newNode;
-            currentNode = newNode;
-          } else {
-            currentNode = existingNode;
-          }
+        String friendlyName = _getFriendlyName(
+          pathPart,
+          filePath,
+          _determineNodeType(pathPart, isLeaf),
+        );
+
+        // Update current path key for the map (using raw names to keep uniqueness in map)
+        // But if we skipped a part, we effectively collapsed the structure.
+        // The map key should arguably represent the logical structure.
+        // Let's append the raw part to currentPath unless skipped.
+        currentPath =
+            currentPath.isEmpty ? originalPathPart : '$currentPath/$originalPathPart';
+
+        // Check if node exists
+        TreeNode? existingNode = pathToNode[currentPath];
+        if (existingNode == null) {
+          final nodeType = _determineNodeType(pathPart, isLeaf);
+          final newNode = TreeNode(
+            name: friendlyName,
+            type: nodeType,
+            filePath: isLeaf ? filePath : null,
+          );
+
+          currentNode.children.add(newNode);
+          pathToNode[currentPath] = newNode;
+          currentNode = newNode;
+        } else {
+          currentNode = existingNode;
         }
       }
     }
 
-    // Second pass: Process flat files (those without paths - single level archive files)
-    for (String filePath in filePaths) {
-      // Skip non-YAML files and already processed files
-      if (!filePath.endsWith('.yaml') ||
-          filePath.contains('complete_raw.yaml') ||
-          filePath.contains('raw_project.yaml') ||
-          _processedFiles.contains(filePath)) {
-        continue;
-      }
-
-      // Only process files that don't have path separators (flat files)
-      if (!filePath.contains('/')) {
-        String displayName = filePath;
-        if (filePath.startsWith('archive_')) {
-          displayName = filePath.replaceFirst('archive_', '');
-        }
-
-        // Skip if we already processed a file with this display name
-        if (processedDisplayNames.contains(displayName)) continue;
-
-        // Mark as processed
-        _processedFiles.add(filePath);
-        processedDisplayNames.add(displayName);
-
-        TreeNode fileNode = TreeNode(
-          name: displayName,
-          type: NodeType.file,
-          filePath: filePath,
-        );
-
-        _rootNode.children.add(fileNode);
-      }
+    // After building tree, apply search filtering if needed
+    if (_searchQuery.isNotEmpty) {
+      _filterTree(_rootNode);
     }
 
     // Process nodes to ensure they're properly ordered
     _sortNodes(_rootNode);
+  }
+
+  // Returns true if this node or any child matches the search
+  bool _filterTree(TreeNode node) {
+    if (node.children.isEmpty) {
+      // Leaf node: check name
+      return node.name.toLowerCase().contains(_searchQuery);
+    }
+
+    // Folder node: check children
+    // Remove children that don't match
+    node.children.removeWhere((child) => !_filterTree(child));
+
+    // If folder itself matches, we might want to keep it even if children don't?
+    // Usually in file trees, if folder matches, show it. If child matches, show folder.
+    bool selfMatches = node.name.toLowerCase().contains(_searchQuery);
+    bool hasMatchingChildren = node.children.isNotEmpty;
+
+    if (hasMatchingChildren) {
+      // If we have matching children, we should expand this node
+      String nodeIdentifier = '${node.type}_${node.name}';
+      _expandedNodes.add(nodeIdentifier);
+    }
+
+    return selfMatches || hasMatchingChildren;
   }
 
   NodeType _determineNodeType(String pathPart, bool isLeaf) {
@@ -263,7 +381,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header with title
+          // Header with title and search
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -272,30 +390,64 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
                 bottom: BorderSide(color: AppTheme.dividerColor, width: 1),
               ),
             ),
-            child: Row(
+            child: Column(
               children: [
-                Icon(
-                  Icons.folder_outlined,
-                  size: 18,
-                  color: AppTheme.primaryColor,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Project Files',
-                  style: AppTheme.headingSmall.copyWith(fontSize: 16),
-                ),
-                const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration:
-                      AppTheme.statusBadgeDecoration(AppTheme.textMuted),
-                  child: Text(
-                    '${widget.yamlFiles.length}',
-                    style: AppTheme.captionLarge.copyWith(
-                      color: AppTheme.textMuted,
-                      fontWeight: FontWeight.w600,
+                Row(
+                  children: [
+                    Icon(
+                      Icons.settings,
+                      size: 18,
+                      color: AppTheme.textSecondary,
                     ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Project Configuration',
+                      style: AppTheme.headingSmall.copyWith(fontSize: 16),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration:
+                          AppTheme.statusBadgeDecoration(AppTheme.textMuted),
+                      child: Text(
+                        '${widget.yamlFiles.length}',
+                        style: AppTheme.captionLarge.copyWith(
+                          color: AppTheme.textMuted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Search bar
+                TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search files...',
+                    hintStyle: TextStyle(
+                      color: AppTheme.textSecondary.withOpacity(0.5),
+                      fontSize: 13,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      size: 16,
+                      color: AppTheme.textSecondary,
+                    ),
+                    filled: true,
+                    fillColor: Color(0xFF0F172A), // Darker background for input
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide: BorderSide.none,
+                    ),
+                    isDense: true,
+                  ),
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 13,
                   ),
                 ),
               ],
