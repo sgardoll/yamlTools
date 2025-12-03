@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert'; // For utf8 decoding & JSON
@@ -21,8 +22,8 @@ import '../theme/app_theme.dart';
 // import '../services/yaml_comparison_service.dart'; // File doesn't exist
 // import '../widgets/export_files_view.dart'; // File doesn't exist
 // Import web-specific functionality conditionally
-import '../web_file_download.dart'
-    if (dart.library.io) '../no_op_file_download.dart' as file_download;
+import '../no_op_file_download.dart'
+    if (dart.library.html) '../web_file_download.dart' as file_download;
 
 // We're not using conditional imports
 
@@ -679,34 +680,38 @@ class _HomeScreenState extends State<HomeScreen> {
     List<int>? decodedZipBytes;
 
     try {
-      final apiUrl = '$_apiBaseUrl/projectYamls?projectId=$projectId';
-      print('Fetching YAML from: $apiUrl');
-
-      final response = await http.get(
-        Uri.parse(apiUrl),
-        headers: {
-          'Authorization': 'Bearer $apiToken',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          // Add cache control to prevent caching issues
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-        },
+      final uri = Uri.https(
+        'api.flutterflow.io',
+        '/v2/projectYamls',
+        {'projectId': projectId},
       );
+      debugPrint('Fetching YAML from: $uri');
 
-      print('YAML fetch response status: ${response.statusCode}');
+      final response = await http
+          .get(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $apiToken',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              // Add cache control to prevent caching issues
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
 
       final String? contentLengthHeader = response.headers['content-length'];
-      print(
-          'DEBUG_LOG: API Response Header Content-Length: $contentLengthHeader');
-      print(
-          'DEBUG_LOG: Actual response.bodyBytes.length: ${response.bodyBytes.length}');
+      debugPrint(
+        'YAML fetch status: ${response.statusCode}, content-length header: ${contentLengthHeader ?? 'absent'}, body-bytes: ${response.bodyBytes.length}',
+      );
       if (contentLengthHeader != null) {
         final int? parsedContentLength = int.tryParse(contentLengthHeader);
         if (parsedContentLength != null &&
             parsedContentLength != response.bodyBytes.length) {
-          print(
-              'DEBUG_LOG: WARNING - Mismatch between Content-Length header ($parsedContentLength) and actual received bytes (${response.bodyBytes.length}). Possible JSON truncation.');
+          debugPrint(
+            'Content-Length mismatch: header=$parsedContentLength, actual=${response.bodyBytes.length}.',
+          );
         }
       }
 
@@ -721,8 +726,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await PreferencesManager.addRecentProject(projectId, _projectName);
 
         final String responseBody = response.body;
-        print(
-            'DEBUG_LOG: API Raw Response Body (first 2000 chars): ${responseBody.substring(0, responseBody.length > 2000 ? 2000 : responseBody.length)}');
+        debugPrint('Received YAML response body length: ${responseBody.length}');
 
         try {
           Map<String, dynamic>? jsonResponse;
@@ -745,11 +749,9 @@ class _HomeScreenState extends State<HomeScreen> {
               'Error: API response is not valid JSON.\nDetails: $e',
               clearRawContent: true,
             );
-            print('JSON Parsing Error: $e');
+            debugPrint('JSON Parsing Error: $e');
             return;
           }
-
-          print('DEBUG_LOG: Parsed JSON type: ${parsedJsonData.runtimeType}');
 
           if (jsonResponse != null) {
             // New (correct) way to access nested key:
@@ -757,27 +759,14 @@ class _HomeScreenState extends State<HomeScreen> {
             String? projectYamlBytesString;
 
             if (valueField is Map<String, dynamic>) {
-              print('DEBUG_LOG: "value" field is a Map.');
               dynamic projectYamlBytesField = valueField['project_yaml_bytes'];
               if (projectYamlBytesField is String) {
                 projectYamlBytesString = projectYamlBytesField;
-                print(
-                    'DEBUG_LOG: Extracted project_yaml_bytes string length: ${projectYamlBytesString.length}');
-                print(
-                    'DEBUG_LOG: Extracted project_yaml_bytes string snippet (first 500 chars): ${projectYamlBytesString.substring(0, projectYamlBytesString.length > 500 ? 500 : projectYamlBytesString.length)}');
-                print(
-                    'DEBUG_LOG: project_yaml_bytes length is multiple of 4: ${projectYamlBytesString.length % 4 == 0}');
-                int paddingChars = 0;
-                if (projectYamlBytesString.endsWith('==')) {
-                  paddingChars = 2;
-                } else if (projectYamlBytesString.endsWith('=')) {
-                  paddingChars = 1;
-                }
-                print(
-                    'DEBUG_LOG: project_yaml_bytes padding characters: $paddingChars');
+                debugPrint(
+                    'project_yaml_bytes length: ${projectYamlBytesString.length}');
               } else {
-                print(
-                    'DEBUG_LOG: project_yaml_bytes key within "value" object is not a String or is null. Actual type: ${projectYamlBytesField?.runtimeType}');
+                debugPrint(
+                    'project_yaml_bytes key within "value" object is not a String or is null. Actual type: ${projectYamlBytesField?.runtimeType}');
                 if (mounted) {
                   _handleYamlFetchError(
                     'Error: Unexpected data type for project YAML content in API response.',
@@ -787,8 +776,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 return;
               }
             } else {
-              print(
-                  'DEBUG_LOG: "value" key not found in JSON response, or it is not a Map. Actual type: ${valueField?.runtimeType}');
+              debugPrint(
+                  '"value" key not found in JSON response, or it is not a Map. Actual type: ${valueField?.runtimeType}');
               if (mounted) {
                 _handleYamlFetchError(
                   'Error: Unexpected API response structure (missing or invalid "value" object).',
@@ -801,8 +790,8 @@ class _HomeScreenState extends State<HomeScreen> {
             // Proceed only if projectYamlBytesString was successfully extracted and is not empty
             if (projectYamlBytesString == null ||
                 projectYamlBytesString.isEmpty) {
-              print(
-                  'DEBUG_LOG: project_yaml_bytes string is null or empty after attempted extraction.');
+              debugPrint(
+                  'project_yaml_bytes string is null or empty after attempted extraction.');
               if (mounted) {
                 if (_generatedYamlMessage.startsWith('Fetching YAML...')) {
                   _handleYamlFetchError(
@@ -832,11 +821,8 @@ class _HomeScreenState extends State<HomeScreen> {
               return;
             }
 
-            print(
-                'DEBUG_LOG: Decoded ZIP Bytes Length: ${decodedZipBytes?.length}');
-            List<int> snippet = decodedZipBytes?.take(32).toList() ?? [];
-            print(
-                'DEBUG_LOG: Decoded ZIP Bytes Snippet (Hex, first 32 bytes): ${_bytesToHexString(snippet)}');
+            debugPrint(
+                'Decoded ZIP Bytes Length: ${decodedZipBytes?.length ?? 0}');
 
             final archive =
                 ZipDecoder().decodeBytes(decodedZipBytes!, verify: true);
@@ -912,7 +898,7 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             }
           } else {
-            print('DEBUG_LOG: Parsed JSON is not a Map.');
+            debugPrint('Parsed YAML response JSON is not a Map.');
             _handleYamlFetchError(
               'Error: API response format is not a valid JSON object.',
               clearRawContent: true,
@@ -923,17 +909,17 @@ class _HomeScreenState extends State<HomeScreen> {
           print('ArchiveException: $e');
           if (decodedZipBytes != null) {
             print(
-                'DEBUG_LOG: ArchiveException caught (${e.message}). Attempting decode with verify: false for diagnostics...');
+                'ArchiveException caught (${e.message}). Attempting decode with verify: false for diagnostics...');
             try {
               final archiveNoValidation =
                   ZipDecoder().decodeBytes(decodedZipBytes!, verify: false);
               print(
-                  'DEBUG_LOG: ZIP decoding with verify: false succeeded. Archive contains ${archiveNoValidation.numberOfFiles()} files.');
+                  'ZIP decoding with verify: false succeeded. Archive contains ${archiveNoValidation.numberOfFiles()} files.');
               // Optionally, log file names:
               // print('DEBUG_LOG: Files found (verify: false): ${archiveNoValidation.files.map((f) => f.name).join(', ')}');
             } catch (eNoValidation) {
               print(
-                  'DEBUG_LOG: ZIP decoding with verify: false also failed: $eNoValidation');
+                  'ZIP decoding with verify: false also failed: $eNoValidation');
             }
           }
           // Update the user message logic
@@ -970,15 +956,25 @@ class _HomeScreenState extends State<HomeScreen> {
                   'Error fetching YAML: Server error (${response.statusCode}). Please try again later.';
             } else {
               errorMsg =
-                  'Error fetching YAML: Unexpected network error (${response.statusCode}). Details: ${response.body}';
+                  'Error fetching YAML: Unexpected response (${response.statusCode}). Please try again.';
             }
         }
         _handleYamlFetchError(
           errorMsg,
           clearRawContent: true,
         );
-        print('Error fetching YAML (${response.statusCode}): ${response.body}');
+        debugPrint(
+            'Error fetching YAML (${response.statusCode}); response bytes: ${response.bodyBytes.length}');
       }
+    } on TimeoutException catch (_) {
+      setStateIfMounted(() {
+        _isLoading = false;
+      });
+      _handleYamlFetchError(
+        'Error: YAML fetch request timed out. Please check your connection and try again.',
+        clearRawContent: true,
+      );
+      return;
     } catch (e) {
       setStateIfMounted(() {
         _isLoading = false; // Set loading to false on error

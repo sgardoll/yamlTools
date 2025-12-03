@@ -220,6 +220,30 @@ class FlutterFlowApiService {
       canonical[normalizedKey] = content;
     });
 
+    final validationResult = await validateProjectYaml(
+      projectId: projectId,
+      apiToken: apiToken,
+      fileKeyToContent: canonical,
+    );
+
+    if (validationResult['valid'] != true) {
+      final errors = (validationResult['errors'] as List?)
+              ?.whereType<String>()
+              .toList() ??
+          <String>[];
+      final reason = errors.isNotEmpty
+          ? errors.join('; ')
+          : 'Validation failed before update.';
+
+      throw FlutterFlowApiException(
+        endpoint: '$baseUrl/validateProjectYaml',
+        statusCode: 400,
+        body: null,
+        message: reason,
+        note: 'Update aborted due to validation failure.',
+      );
+    }
+
     // Create Base64 Encoded Zip
     final yamlContent = _createProjectZip(canonical);
 
