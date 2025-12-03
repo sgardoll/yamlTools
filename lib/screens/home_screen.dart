@@ -82,7 +82,6 @@ class _HomeScreenState extends State<HomeScreen> {
   FlutterFlowProject? _selectedProject;
   bool _isFetchingProjects = false;
   String? _projectsError;
-  Timer? _projectsDebounce;
   String? _lastFetchedApiToken;
 
   // Project name for display in recent projects list
@@ -420,8 +419,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _handleApiTokenChanged() {
     final apiToken = _apiTokenController.text.trim();
-    _projectsDebounce?.cancel();
-
     setState(() {
       _projectsError = null;
       _selectedProject = null;
@@ -439,9 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    _projectsDebounce = Timer(const Duration(milliseconds: 450), () {
-      _loadProjectsForApiKey(apiToken);
-    });
+    _loadProjectsForApiKey(apiToken);
   }
 
   void _handleProjectSearchChanged() {
@@ -526,8 +521,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _apiTokenController.dispose();
     _projectSearchController?.removeListener(_handleProjectSearchChanged);
     _projectSearchController?.dispose();
-    _projectsDebounce?.cancel();
-
     // Dispose of all file content controllers
     _fileControllers.forEach((fileName, controller) {
       controller.dispose();
