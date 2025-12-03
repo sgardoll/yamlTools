@@ -83,6 +83,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isFetchingProjects = false;
   String? _projectsError;
   String? _lastFetchedApiToken;
+  Timer? _apiTokenDebounce;
+  bool _suppressApiTokenListener = false;
 
   // Project name for display in recent projects list
   String _projectName = "";
@@ -410,14 +412,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadSavedApiToken() async {
     final savedApiToken = await PreferencesManager.getApiKey();
     if (savedApiToken != null && savedApiToken.isNotEmpty) {
-      setState(() {
-        _apiTokenController.text = savedApiToken;
-      });
+      _suppressApiTokenListener = true;
+      _apiTokenController.text = savedApiToken;
+      _suppressApiTokenListener = false;
       await _loadProjectsForApiKey(savedApiToken);
     }
   }
 
   void _handleApiTokenChanged() {
+    if (_suppressApiTokenListener) {
+      return;
+    }
+
+    _apiTokenDebounce?.cancel();
     final apiToken = _apiTokenController.text.trim();
     setState(() {
       _projectsError = null;
@@ -436,7 +443,10 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    _loadProjectsForApiKey(apiToken);
+    _apiTokenDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      _loadProjectsForApiKey(_apiTokenController.text.trim());
+    });
   }
 
   void _handleProjectSearchChanged() {
@@ -517,6 +527,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _apiTokenDebounce?.cancel();
     _projectIdController.dispose();
     _apiTokenController.dispose();
     _projectSearchController?.removeListener(_handleProjectSearchChanged);

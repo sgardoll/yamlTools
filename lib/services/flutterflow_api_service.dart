@@ -41,23 +41,27 @@ class FlutterFlowApiService {
       throw ArgumentError('API token cannot be empty');
     }
 
-    final uri = Uri.parse('$baseUrl/projects');
+    final uri = Uri.parse('$baseUrl/l/listProjects');
     debugPrint('Fetching projects via: $uri');
 
     http.Response? response;
 
     try {
-      response = await http.get(
+      response = await http.post(
         uri,
         headers: {
           'Authorization': 'Bearer $apiToken',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
+        body: jsonEncode({
+          'project_type': 'ALL',
+          'deserialize_response': true,
+        }),
       );
     } catch (e) {
       throw FlutterFlowApiException(
-        endpoint: '$baseUrl/projects',
+        endpoint: '$baseUrl/l/listProjects',
         message: 'Network error while fetching projects: $e',
         isNetworkError: true,
       );
@@ -65,7 +69,7 @@ class FlutterFlowApiService {
 
     if (response.statusCode != 200) {
       throw buildApiException(
-        endpoint: '$baseUrl/projects',
+        endpoint: '$baseUrl/l/listProjects',
         response: response,
         note: 'Failed to load projects for the current user.',
       );
@@ -76,28 +80,94 @@ class FlutterFlowApiService {
       decoded = jsonDecode(utf8.decode(response.bodyBytes));
     } catch (e) {
       throw FlutterFlowApiException(
-        endpoint: '$baseUrl/projects',
+        endpoint: '$baseUrl/l/listProjects',
         response: response,
         message: 'Invalid JSON response while loading projects: $e',
       );
     }
 
-    final List<dynamic> projectList;
-    if (decoded is List) {
-      projectList = decoded;
-    } else if (decoded is Map<String, dynamic> && decoded['projects'] is List) {
-      projectList = decoded['projects'] as List;
-    } else {
+    List<dynamic>? entries;
+
+    if (decoded is Map<String, dynamic>) {
+      // Respect explicit failure flag if present
+      if (decoded.containsKey('success') && decoded['success'] == false) {
+        final reason = decoded['reason']?.toString();
+        throw FlutterFlowApiException(
+          endpoint: '$baseUrl/l/listProjects',
+          response: response,
+          message: reason?.isNotEmpty == true
+              ? reason!
+              : 'Project listing failed with success=false.',
+        );
+      }
+
+      dynamic payload = decoded;
+      if (payload['value'] != null) {
+        payload = payload['value'];
+      }
+
+      // Some responses embed JSON as a string; decode if so.
+      if (payload is String) {
+        try {
+          payload = jsonDecode(payload);
+        } catch (_) {
+          throw FlutterFlowApiException(
+            endpoint: '$baseUrl/l/listProjects',
+            response: response,
+            message:
+                'Unable to parse projects payload from server response (malformed JSON string).',
+          );
+        }
+      }
+
+      if (payload is Map<String, dynamic>) {
+        if (payload['entries'] is List) {
+          entries = payload['entries'] as List;
+        } else if (payload['projects'] is List) {
+          entries = payload['projects'] as List;
+        } else if (payload['items'] is List) {
+          entries = payload['items'] as List;
+        }
+      } else if (payload is List) {
+        entries = payload;
+      }
+    } else if (decoded is List) {
+      entries = decoded;
+    }
+
+    if (entries == null || entries.isEmpty) {
       throw FlutterFlowApiException(
-        endpoint: '$baseUrl/projects',
+        endpoint: '$baseUrl/l/listProjects',
         response: response,
-        message: 'Unexpected projects response shape.',
+        message: 'No projects returned from API.',
       );
     }
 
-    return projectList
+    FlutterFlowProject? _projectFromEntry(Map<String, dynamic> entry) {
+      final projectData = entry['project'];
+      final id = (entry['id'] ??
+              entry['project_id'] ??
+              entry['projectId'] ??
+              (projectData is Map<String, dynamic> ? projectData['id'] : null))
+          ?.toString();
+      final name = (entry['name'] ??
+              entry['projectName'] ??
+              (projectData is Map<String, dynamic>
+                  ? projectData['name']
+                  : null))
+          ?.toString();
+
+      if (id == null || id.isEmpty) return null;
+      return FlutterFlowProject(
+        id: id,
+        name: (name == null || name.isEmpty) ? 'Untitled Project' : name,
+      );
+    }
+
+    return entries
         .whereType<Map<String, dynamic>>()
-        .map((json) => FlutterFlowProject.fromJson(json))
+        .map(_projectFromEntry)
+        .whereType<FlutterFlowProject>()
         .where((project) => project.id.isNotEmpty)
         .toList();
   }
@@ -119,7 +189,8 @@ class FlutterFlowApiService {
       body = response.body;
       // Try to decode JSON to extract errors/messages
       try {
-        jsonBody = body.isNotEmpty ? json.decode(body) as Map<String, dynamic> : null;
+        jsonBody =
+            body.isNotEmpty ? json.decode(body) as Map<String, dynamic> : null;
       } catch (_) {
         jsonBody = null;
       }
@@ -310,10 +381,9 @@ class FlutterFlowApiService {
     );
 
     if (validationResult['valid'] != true) {
-      final errors = (validationResult['errors'] as List?)
-              ?.whereType<String>()
-              .toList() ??
-          <String>[];
+      final errors =
+          (validationResult['errors'] as List?)?.whereType<String>().toList() ??
+              <String>[];
       final reason = errors.isNotEmpty
           ? errors.join('; ')
           : 'Validation failed before update.';
@@ -353,7 +423,8 @@ class FlutterFlowApiService {
         body: body,
       );
 
-      debugPrint('Primary update response status: ${primaryResponse.statusCode}');
+      debugPrint(
+          'Primary update response status: ${primaryResponse.statusCode}');
       debugPrint('Primary update response body: ${primaryResponse.body}');
 
       if (primaryResponse.statusCode == 200) {
@@ -418,11 +489,13 @@ class FlutterFlowApiService {
 
       // If the primary endpoint returns a client error (4xx), it's very likely
       // a validation error. Surface it.
-      if (primaryResponse.statusCode >= 400 && primaryResponse.statusCode < 500) {
+      if (primaryResponse.statusCode >= 400 &&
+          primaryResponse.statusCode < 500) {
         throw buildApiException(
           endpoint: primaryUri.toString(),
           response: primaryResponse,
-          note: 'Primary endpoint returned client error — validation likely failed.',
+          note:
+              'Primary endpoint returned client error — validation likely failed.',
         );
       }
 
@@ -532,8 +605,7 @@ class FlutterFlowApiService {
     final withoutArchive = _stripArchivePrefix(normalizedPath);
     final withoutArchiveWithExt =
         _ensureYamlExtensionPreservingArchive(withoutArchive);
-    final withoutArchiveWithoutExt =
-        _stripYamlExtension(withoutArchiveWithExt);
+    final withoutArchiveWithoutExt = _stripYamlExtension(withoutArchiveWithExt);
 
     // Default probing order per empirical strategy (no extension -> extension -> archive variants).
     add(withoutExt);
@@ -630,7 +702,8 @@ class FlutterFlowApiService {
     List<String> candidates,
     String filePath,
   ) {
-    final preferredSignature = _formatPreferenceByScope[_scopeForPath(filePath)];
+    final preferredSignature =
+        _formatPreferenceByScope[_scopeForPath(filePath)];
     if (preferredSignature == null) {
       return candidates;
     }
@@ -684,7 +757,8 @@ class FlutterFlowApiService {
     // to avoid false positives from the legacy fileKey/fileContent shape.
     final uri = Uri.parse('$baseUrl/validateProjectYaml');
     final yamlContent = _createProjectZip({normalizedKey: content});
-    final payload = jsonEncode({'projectId': projectId, 'yamlContent': yamlContent});
+    final payload =
+        jsonEncode({'projectId': projectId, 'yamlContent': yamlContent});
 
     debugPrint('Validation probe payload for "$fileKey": $payload');
 
@@ -820,6 +894,7 @@ class FlutterFlowApiException implements Exception {
   final String? endpoint;
   final String? body;
   final String? note;
+  final http.Response? response;
   final bool isNetworkError;
 
   const FlutterFlowApiException({
@@ -828,6 +903,7 @@ class FlutterFlowApiException implements Exception {
     this.endpoint,
     this.body,
     this.note,
+    this.response,
     this.isNetworkError = false,
   });
 
