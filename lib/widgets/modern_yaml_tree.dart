@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 
 enum NodeType {
   root,
+  aiAssistSection,
   unsavedSection,
   folder,
   collection,
@@ -44,6 +45,7 @@ class ModernYamlTree extends StatefulWidget {
   final Map<String, DateTime>? validationTimestamps;
   final Map<String, DateTime>? syncTimestamps;
   final Map<String, DateTime>? updateTimestamps;
+  final Map<String, DateTime>? aiTouchedTimestamps;
 
   const ModernYamlTree({
     Key? key,
@@ -53,6 +55,7 @@ class ModernYamlTree extends StatefulWidget {
     this.validationTimestamps,
     this.syncTimestamps,
     this.updateTimestamps,
+    this.aiTouchedTimestamps,
   }) : super(key: key);
 
   @override
@@ -64,6 +67,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   Set<String> _expandedNodes = {};
   String? _selectedFilePath;
   int _previousUnsavedCount = 0;
+  int _previousAiTouchedCount = 0;
 
   final TextEditingController _searchController = TextEditingController();
   Map<String, String> _pageDisplayNames = {};
@@ -210,6 +214,39 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         .toList()
       ..sort();
 
+    final List<TreeNode> aiTouchedNodes = [];
+    final aiTouchedEntries = widget.aiTouchedTimestamps?.entries.toList() ?? [];
+    aiTouchedEntries.sort((a, b) => b.value.compareTo(a.value));
+
+    for (final entry in aiTouchedEntries) {
+      final filePath = entry.key;
+      if (!widget.yamlFiles.containsKey(filePath)) continue;
+
+      final filename = filePath.split('/').last;
+      final type = _determineNodeType(filename, true);
+      final friendlyName = _getFriendlyName(filename, filePath, type);
+      aiTouchedNodes.add(
+        TreeNode(
+          name: friendlyName,
+          type: type,
+          filePath: filePath,
+        ),
+      );
+    }
+
+    if (aiTouchedNodes.isNotEmpty) {
+      final aiSection = TreeNode(
+        name: 'AI Assist Changes',
+        type: NodeType.aiAssistSection,
+        children: aiTouchedNodes,
+      );
+      _rootNode.children.add(aiSection);
+      if (_previousAiTouchedCount == 0) {
+        _expandedNodes.add('${NodeType.aiAssistSection}_AI Assist Changes');
+      }
+    }
+    _previousAiTouchedCount = aiTouchedNodes.length;
+
     // Build unsaved section
     final List<TreeNode> unsavedNodes = [];
     for (final filePath in filePaths) {
@@ -348,6 +385,8 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   void _sortNodes(TreeNode node) {
     node.children.sort((a, b) {
       if (a.type != b.type) {
+        if (a.type == NodeType.aiAssistSection) return -1;
+        if (b.type == NodeType.aiAssistSection) return 1;
         if (a.type == NodeType.unsavedSection) return -1;
         if (b.type == NodeType.unsavedSection) return 1;
         if (a.type == NodeType.collection) return -1;
@@ -476,6 +515,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     IconData icon = _getNodeIcon(node.type);
     Color iconColor = _getNodeColor(node.type);
     Color textColor = _getTextColor(node);
+    final statusBadges = _buildStatusBadges(node);
 
     return Material(
       color: Colors.transparent,
@@ -530,6 +570,14 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (statusBadges.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: statusBadges,
+                  ),
+                ],
                 if (hasChildren)
                   InkWell(
                     onTap: () {
@@ -562,6 +610,8 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
   IconData _getNodeIcon(NodeType type) {
     switch (type) {
+      case NodeType.aiAssistSection:
+        return Icons.auto_awesome;
       case NodeType.unsavedSection:
         return Icons.pending_actions;
       case NodeType.collection:
@@ -595,6 +645,8 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
   Color _getNodeColor(NodeType type) {
     switch (type) {
+      case NodeType.aiAssistSection:
+        return AppTheme.primaryColor;
       case NodeType.unsavedSection:
         return Colors.orange;
       case NodeType.collection:
@@ -622,9 +674,100 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     if (node.type == NodeType.unsavedSection) {
       return Colors.orange;
     }
+    if (node.type == NodeType.aiAssistSection) {
+      return AppTheme.primaryColor;
+    }
     if (node.filePath != null && _isUnsaved(node.filePath!)) {
       return Colors.orange;
     }
     return AppTheme.textPrimary;
+  }
+
+  List<Widget> _buildStatusBadges(TreeNode node) {
+    if (node.filePath == null) return [];
+
+    final filePath = node.filePath!;
+    final badges = <Widget>[];
+    final updateAt = widget.updateTimestamps?[filePath];
+    final syncAt = widget.syncTimestamps?[filePath];
+    final validationAt = widget.validationTimestamps?[filePath];
+    final isUnsaved = _isUnsaved(filePath);
+    final isValidated =
+        validationAt != null && (updateAt == null || !validationAt.isBefore(updateAt));
+    final isSynced =
+        syncAt != null && (updateAt == null || !syncAt.isBefore(updateAt));
+    final isAiTouched = widget.aiTouchedTimestamps?.containsKey(filePath) ?? false;
+
+    if (isAiTouched) {
+      badges.add(_buildChip(
+        label: 'AI edit',
+        color: AppTheme.primaryColor.withOpacity(0.15),
+        borderColor: AppTheme.primaryColor,
+        icon: Icons.auto_fix_high,
+        textColor: AppTheme.primaryColor,
+      ));
+    }
+
+    if (isUnsaved) {
+      badges.add(_buildChip(
+        label: 'Unsaved',
+        color: Colors.orange.withOpacity(0.15),
+        borderColor: Colors.orange,
+        icon: Icons.warning_amber_rounded,
+        textColor: Colors.orange,
+      ));
+    } else if (isSynced) {
+      badges.add(_buildChip(
+        label: 'Saved',
+        color: AppTheme.successColor.withOpacity(0.15),
+        borderColor: AppTheme.successColor,
+        icon: Icons.check_circle,
+        textColor: AppTheme.successColor,
+      ));
+    }
+
+    if (isValidated) {
+      badges.add(_buildChip(
+        label: 'Validated',
+        color: AppTheme.validColor.withOpacity(0.15),
+        borderColor: AppTheme.validColor,
+        icon: Icons.verified,
+        textColor: AppTheme.validColor,
+      ));
+    }
+
+    return badges;
+  }
+
+  Widget _buildChip({
+    required String label,
+    required Color color,
+    required Color borderColor,
+    required IconData icon,
+    required Color textColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor.withOpacity(0.6)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: textColor),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

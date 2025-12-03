@@ -61,6 +61,8 @@ class _HomeScreenState extends State<HomeScreen> {
       {}; // Track when files were updated/saved locally
   Map<String, DateTime> _fileSyncTimestamps =
       {}; // Track when files were successfully synced to FlutterFlow
+  Map<String, DateTime> _aiTouchedFiles =
+      {}; // Track files modified by AI Assist for quick review
 
   bool _isOutputExpanded = false; // For expandable output section
   bool _hasModifications = false; // Track if modifications have been made
@@ -128,6 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // Clear timestamps associated with local edits
       _fileUpdateTimestamps.remove(filePath);
       _fileValidationTimestamps.remove(filePath);
+      _aiTouchedFiles.remove(filePath);
       // Do not clear sync timestamps for files that had previous successful syncs
 
       // Update operation message
@@ -589,7 +592,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Apply changes to a file and update modification tracking
-  Future<void> _applyFileChanges(String fileName, String newContent,
+  Future<String> _applyFileChanges(String fileName, String newContent,
       {bool validated = false, String? messageOverride}) async {
     final sanitizedName = _normalizeFilePath(fileName);
     String effectiveName = sanitizedName;
@@ -640,6 +643,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     // Note: API update is handled by YamlContentViewer after successful validation
+    return effectiveName;
   }
 
   // Helper to auto-expand important files
@@ -796,6 +800,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _fileValidationTimestamps.clear(); // Clear validation timestamps
       _fileUpdateTimestamps.clear(); // Clear update timestamps
       _fileSyncTimestamps.clear(); // Clear sync timestamps
+      _aiTouchedFiles.clear(); // Clear AI-staged files
       _hasModifications = false; // Reset modification state for fresh fetch
       _expandedFiles.clear(); // Clear expanded files state
       _collapseCredentials = true; // Collapse credentials after fetch
@@ -1246,6 +1251,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         _fileValidationTimestamps,
                                     syncTimestamps: _fileSyncTimestamps,
                                     updateTimestamps: _fileUpdateTimestamps,
+                                    aiTouchedTimestamps: _aiTouchedFiles,
                                   ),
                                 ),
 
@@ -1284,11 +1290,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                     onContentChanged: _selectedFilePath != null
                                         ? (content) async {
                                             // Content has been validated successfully in YamlContentViewer
-                                            await _applyFileChanges(
+                                            final normalizedPath =
+                                                await _applyFileChanges(
                                               _selectedFilePath!,
                                               content,
                                               validated: true,
                                             );
+                                            setState(() {
+                                              _selectedFilePath = normalizedPath;
+                                            });
                                           }
                                         : null,
                                     onFileRenamed: _handleFileRenamed,
@@ -1298,6 +1308,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             setState(() {
                                               _fileSyncTimestamps[filePath] =
                                                   DateTime.now();
+                                              _aiTouchedFiles.remove(filePath);
                                               _operationMessage =
                                                   'File "$filePath" saved and synced to FlutterFlow.';
                                               _generatedYamlMessage =
@@ -1822,34 +1833,47 @@ class _HomeScreenState extends State<HomeScreen> {
       _operationMessage = "Applied AI changes: ${change.summary}";
     });
 
+    final stagedPaths = <String>{};
+
     for (var mod in change.modifications) {
       if (!mod.isNewFile && _exportedFiles.containsKey(mod.filePath)) {
         final base = mod.originalContent.isNotEmpty
             ? mod.originalContent
             : _exportedFiles[mod.filePath] ?? '';
         final merged = _nonDestructiveYamlMergeString(base, mod.newContent);
-        await _updateYamlFromAI(merged, existingFile: mod.filePath);
+        final appliedPath =
+            await _updateYamlFromAI(merged, existingFile: mod.filePath);
+        if (appliedPath != null) {
+          stagedPaths.add(appliedPath);
+        }
       } else {
-        await _updateYamlFromAI(mod.newContent,
+        final appliedPath = await _updateYamlFromAI(mod.newContent,
             existingFile: mod.isNewFile ? null : mod.filePath);
+        if (appliedPath != null) {
+          stagedPaths.add(appliedPath);
+        }
       }
+    }
+
+    if (stagedPaths.isNotEmpty) {
+      final now = DateTime.now();
+      setState(() {
+        for (final path in stagedPaths) {
+          _aiTouchedFiles[path] = now;
+        }
+      });
     }
 
     // Notify user to review and save each file to validate & sync
     try {
-      final appliedFiles = change.modifications
-          .map((m) => m.filePath)
-          .toSet()
-          .whereType<String>()
-          .toList();
-      final fileCount = appliedFiles.length;
+      final fileCount = stagedPaths.length;
       if (mounted && fileCount > 0) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
             SnackBar(
               content: Text(
-                'Staged $fileCount file${fileCount == 1 ? '' : 's'} as local edits. Select each file and press Save to validate and sync to FlutterFlow.',
+                'Staged $fileCount file${fileCount == 1 ? '' : 's'} as local edits. Check the AI Assist Changes section to review and press Save to validate and sync to FlutterFlow.',
               ),
               duration: Duration(seconds: 5),
             ),
@@ -1858,9 +1882,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-  Future<void> _updateYamlFromAI(String yamlContent,
+  Future<String?> _updateYamlFromAI(String yamlContent,
       {String? existingFile}) async {
-    if (yamlContent.isEmpty) return;
+    if (yamlContent.isEmpty) return null;
 
     final inferredPath = YamlFileUtils.inferFilePathFromContent(yamlContent);
 
@@ -1874,7 +1898,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       // Stage the change first so timestamps are set and the tree shows Unsaved immediately
-      await _applyFileChanges(
+      final appliedPath = await _applyFileChanges(
         targetPath,
         yamlContent,
         validated: false,
@@ -1884,20 +1908,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Now update selection and controllers for editing UI
       setState(() {
-        _expandedFiles.add(targetPath);
-        _selectedFilePath = targetPath;
+        _expandedFiles.add(appliedPath);
+        _selectedFilePath = appliedPath;
         final controller =
-            _fileControllers[targetPath] ?? TextEditingController();
+            _fileControllers[appliedPath] ?? TextEditingController();
         controller.text = yamlContent;
-        _fileControllers[targetPath] = controller;
+        _fileControllers[appliedPath] = controller;
       });
+      return appliedPath;
     } else {
       // Create a new file with AI-generated content
       final rawDesiredPath = inferredPath ?? _generateTemporaryAiFileName();
       final filePath = _ensureUniqueFilePath(rawDesiredPath);
 
       // Stage the new file first so Unsaved indicator appears immediately
-      await _applyFileChanges(
+      final appliedPath = await _applyFileChanges(
         filePath,
         yamlContent,
         validated: false,
@@ -1907,10 +1932,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Then set selection and editor state
       setState(() {
-        _expandedFiles.add(filePath);
-        _selectedFilePath = filePath;
-        _fileControllers[filePath] = TextEditingController(text: yamlContent);
+        _expandedFiles.add(appliedPath);
+        _selectedFilePath = appliedPath;
+        _fileControllers[appliedPath] = TextEditingController(text: yamlContent);
       });
+      return appliedPath;
     }
   }
 
@@ -1968,6 +1994,7 @@ class _HomeScreenState extends State<HomeScreen> {
     moveEntry(_fileValidationTimestamps);
     moveEntry(_fileUpdateTimestamps);
     moveEntry(_fileSyncTimestamps);
+    moveEntry(_aiTouchedFiles);
 
     if (_expandedFiles.remove(oldPath)) {
       _expandedFiles.add(newPath);
