@@ -43,8 +43,8 @@ void main() {
         'complete_raw.yaml': 'raw',
       });
 
-      expect(result.keys, containsAll(['pages/home', 'theme/colors', 'complete_raw']));
-      expect(result['pages/home'], 'home');
+      expect(result.keys, containsAll(['page/home', 'theme/colors', 'complete_raw']));
+      expect(result['page/home'], 'home');
       expect(result['complete_raw'], 'raw');
     });
 
@@ -112,6 +112,14 @@ page:
       expect(result.changed, isTrue);
       expect(result.expectedKey, 'Scaffold_fixed');
       expect(result.content.contains('key: Scaffold_fixed'), isTrue);
+    });
+
+    test('normalizes archive_pages prefix to page for API keys', () {
+      final normalized = YamlFileUtils.normalizeFilePath('archive_pages/home.yaml');
+
+      expect(normalized.canonicalPath, 'page/home.yaml');
+      expect(normalized.apiFileKey, 'page/home');
+      expect(normalized.expectedYamlKey, 'home');
     });
   });
 

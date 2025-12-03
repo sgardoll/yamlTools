@@ -46,6 +46,10 @@ void main() {
         equals('page/id-123'),
       );
       expect(
+        FlutterFlowApiService.getFileKey('archive_pages/home.yaml'),
+        equals('page/home'),
+      );
+      expect(
         FlutterFlowApiService
             .getFileKey('archive_page/id-123/page-widget-tree-outline.yaml'),
         equals('page/id-123/page-widget-tree-outline'),
