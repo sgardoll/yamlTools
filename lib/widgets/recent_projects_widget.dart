@@ -46,7 +46,9 @@ class _RecentProjectsWidgetState extends State<RecentProjectsWidget> {
     });
 
     final projects = await PreferencesManager.getRecentProjects();
-    projects.sort((a, b) => (b['timestamp'] ?? 0).compareTo(a['timestamp'] ?? 0));
+    final projects = await PreferencesManager.getRecentProjects();
+    final sortedProjects = List<Map<String, dynamic>>.from(projects);
+    sortedProjects.sort((a, b) => (b['timestamp'] ?? 0).compareTo(a['timestamp'] ?? 0));
 
     setState(() {
       _recentProjects = projects;
