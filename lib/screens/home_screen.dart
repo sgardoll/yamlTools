@@ -84,8 +84,9 @@ class _HomeScreenState extends State<HomeScreen> {
   FlutterFlowProject? _selectedProject;
   bool _isFetchingProjects = false;
   String? _projectsError;
-  Timer? _projectsDebounce;
   String? _lastFetchedApiToken;
+  Timer? _apiTokenDebounce;
+  bool _suppressApiTokenListener = false;
 
   // Project name for display in recent projects list
   String _projectName = "";
@@ -414,17 +415,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadSavedApiToken() async {
     final savedApiToken = await PreferencesManager.getApiKey();
     if (savedApiToken != null && savedApiToken.isNotEmpty) {
-      setState(() {
-        _apiTokenController.text = savedApiToken;
-      });
+      _suppressApiTokenListener = true;
+      _apiTokenController.text = savedApiToken;
+      _suppressApiTokenListener = false;
       await _loadProjectsForApiKey(savedApiToken);
     }
   }
 
   void _handleApiTokenChanged() {
-    final apiToken = _apiTokenController.text.trim();
-    _projectsDebounce?.cancel();
+    if (_suppressApiTokenListener) {
+      return;
+    }
 
+    _apiTokenDebounce?.cancel();
+    final apiToken = _apiTokenController.text.trim();
     setState(() {
       _projectsError = null;
       _selectedProject = null;
@@ -442,8 +446,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    _projectsDebounce = Timer(const Duration(milliseconds: 450), () {
-      _loadProjectsForApiKey(apiToken);
+    _apiTokenDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      _loadProjectsForApiKey(_apiTokenController.text.trim());
     });
   }
 
@@ -525,12 +530,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _apiTokenDebounce?.cancel();
     _projectIdController.dispose();
     _apiTokenController.dispose();
     _projectSearchController?.removeListener(_handleProjectSearchChanged);
     _projectSearchController?.dispose();
-    _projectsDebounce?.cancel();
-
     // Dispose of all file content controllers
     _fileControllers.forEach((fileName, controller) {
       controller.dispose();
@@ -1287,21 +1291,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                             ? () => _revertLocalEdits(
                                                 _selectedFilePath!)
                                             : null,
-                                      onContentChanged: _selectedFilePath != null
-                                          ? (content) async {
-                                              // Content has been validated successfully in YamlContentViewer
-                                              final normalizedPath =
-                                                  await _applyFileChanges(
-                                                _selectedFilePath!,
-                                                content,
-                                                validated: true,
-                                              );
-                                              if (!mounted) return;
-                                              setState(() {
-                                                _selectedFilePath = normalizedPath;
-                                              });
-                                            }
-                                          : null,
+                                    onContentChanged: _selectedFilePath != null
+                                        ? (content) async {
+                                            // Content has been validated successfully in YamlContentViewer
+                                            final normalizedPath =
+                                                await _applyFileChanges(
+                                              _selectedFilePath!,
+                                              content,
+                                              validated: true,
+                                            );
+                                            setState(() {
+                                              _selectedFilePath = normalizedPath;
+                                            });
+                                          }
+                                        : null,
                                     onFileRenamed: _handleFileRenamed,
                                     onFileUpdated: _selectedFilePath != null
                                         ? (filePath) {

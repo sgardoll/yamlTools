@@ -215,7 +215,6 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
       ..sort();
 
     final List<TreeNode> aiTouchedNodes = [];
-    final Set<String> aiTouchedPaths = {};
     final aiTouchedEntries = widget.aiTouchedTimestamps?.entries.toList() ?? [];
     aiTouchedEntries.sort((a, b) => b.value.compareTo(a.value));
 
@@ -226,7 +225,6 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
       final filename = filePath.split('/').last;
       final type = _determineNodeType(filename, true);
       final friendlyName = _getFriendlyName(filename, filePath, type);
-      aiTouchedPaths.add(filePath);
       aiTouchedNodes.add(
         TreeNode(
           name: friendlyName,
@@ -248,9 +246,6 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
       }
     }
     _previousAiTouchedCount = aiTouchedNodes.length;
-
-    final List<String> regularFilePaths =
-        filePaths.where((path) => !aiTouchedPaths.contains(path)).toList();
 
     // Build unsaved section
     final List<TreeNode> unsavedNodes = [];
