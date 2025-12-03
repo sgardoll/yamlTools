@@ -489,7 +489,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
 
-      await PreferencesManager.saveApiKey(apiToken);
+      if (mounted) {
+        await PreferencesManager.saveApiKey(apiToken);
+      }
     } catch (e) {
       final errorMessage = e is FlutterFlowApiException
           ? e.message
