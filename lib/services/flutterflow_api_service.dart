@@ -33,7 +33,12 @@ class FlutterFlowApiService {
 
       // Prefer structured fields
       if (jsonBody != null) {
-        message = (jsonBody['error'] ?? jsonBody['message'] ?? body ?? '').toString();
+        message = (jsonBody['error'] ??
+                jsonBody['message'] ??
+                jsonBody['reason'] ??
+                body ??
+                '')
+            .toString();
       } else {
         message = body ?? 'HTTP $status error';
       }
@@ -196,6 +201,36 @@ class FlutterFlowApiService {
       debugPrint('Primary update response body: ${primaryResponse.body}');
 
       if (primaryResponse.statusCode == 200) {
+        bool? successFlag;
+        String? responseReason;
+
+        try {
+          final decoded = jsonDecode(primaryResponse.body);
+          if (decoded is Map<String, dynamic>) {
+            final rawSuccess = decoded['success'];
+            if (rawSuccess is bool) {
+              successFlag = rawSuccess;
+            }
+            responseReason =
+                (decoded['reason'] ?? decoded['message'] ?? decoded['error'])
+                    ?.toString();
+          }
+        } catch (parseError) {
+          debugPrint('Unable to parse update response JSON: $parseError');
+        }
+
+        // FlutterFlow can return HTTP 200 with success=false when it rejects the
+        // update (e.g., invalid file key or schema error). Surface that instead
+        // of silently treating the call as successful.
+        if (successFlag == false) {
+          throw buildApiException(
+            endpoint: primaryUri.toString(),
+            response: primaryResponse,
+            note: responseReason ??
+                'Update rejected by FlutterFlow (success=false in response).',
+          );
+        }
+
         debugPrint('Successfully updated project YAML via primary endpoint');
         return true;
       }
