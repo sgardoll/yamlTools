@@ -69,7 +69,7 @@ class FlutterFlowApiService {
 
     fileKeyToContent.forEach((key, content) {
       // Ensure key has .yaml extension for the zip entry
-      String entryName = key;
+      String entryName = getFileKey(key);
       if (!entryName.toLowerCase().endsWith('.yaml') &&
           !entryName.toLowerCase().endsWith('.yml')) {
         entryName = '$entryName.yaml';
@@ -213,8 +213,15 @@ class FlutterFlowApiService {
       throw ArgumentError('File content map cannot be empty');
     }
 
+    // Canonicalize file keys (strip extensions/archive prefixes) before zipping
+    final canonical = <String, String>{};
+    fileKeyToContent.forEach((rawKey, content) {
+      final normalizedKey = getFileKey(rawKey);
+      canonical[normalizedKey] = content;
+    });
+
     // Create Base64 Encoded Zip
-    final yamlContent = _createProjectZip(fileKeyToContent);
+    final yamlContent = _createProjectZip(canonical);
 
     final body = jsonEncode({
       'projectId': projectId,
@@ -222,7 +229,7 @@ class FlutterFlowApiService {
     });
 
     debugPrint('Updating project YAML for project: $projectId');
-    debugPrint('Files to update: ${fileKeyToContent.keys.join(', ')}');
+    debugPrint('Files to update: ${canonical.keys.join(', ')}');
 
     try {
       // Primary endpoint per updated FlutterFlow API docs
@@ -564,10 +571,12 @@ class FlutterFlowApiService {
     required String fileKey,
     required String content,
   }) async {
+    final normalizedKey = getFileKey(fileKey);
+
     // Probe using the same zip-based payload we use for real validation/updates
     // to avoid false positives from the legacy fileKey/fileContent shape.
     final uri = Uri.parse('$baseUrl/validateProjectYaml');
-    final yamlContent = _createProjectZip({fileKey: content});
+    final yamlContent = _createProjectZip({normalizedKey: content});
     final payload = jsonEncode({'projectId': projectId, 'yamlContent': yamlContent});
 
     debugPrint('Validation probe payload for "$fileKey": $payload');
@@ -663,10 +672,11 @@ class FlutterFlowApiService {
       );
 
       if (works) {
-        debugPrint('✅ Working key found: "$candidate"');
-        _fileKeyCache[cacheKey] = candidate;
+        final canonicalKey = getFileKey(candidate);
+        debugPrint('✅ Working key found: "$canonicalKey" (from "$candidate")');
+        _fileKeyCache[cacheKey] = canonicalKey;
         _rememberFormatPreference(filePath, candidate);
-        return candidate;
+        return canonicalKey;
       } else {
         debugPrint('❌ Key failed: "$candidate"');
       }
