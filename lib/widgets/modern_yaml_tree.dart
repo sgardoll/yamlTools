@@ -197,9 +197,8 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     final updatedAt = widget.updateTimestamps![filePath];
     if (updatedAt == null) return false;
 
-    final syncedAt = widget.syncTimestamps != null
-        ? widget.syncTimestamps![filePath]
-        : null;
+    final syncedAt =
+        widget.syncTimestamps != null ? widget.syncTimestamps![filePath] : null;
 
     return syncedAt == null || updatedAt.isAfter(syncedAt);
   }
@@ -249,7 +248,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
     // Build unsaved section
     final List<TreeNode> unsavedNodes = [];
-    for (final filePath in regularFilePaths) {
+    for (final filePath in filePaths) {
       if (_isUnsaved(filePath)) {
         final filename = filePath.split('/').last;
         final type = _determineNodeType(filename, true);
@@ -282,7 +281,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
       return _searchQuery.isEmpty || name.toLowerCase().contains(_searchQuery);
     }
 
-    for (final filePath in regularFilePaths) {
+    for (final filePath in filePaths) {
       List<String> pathParts;
       String cleanFilePath = filePath;
 
@@ -433,8 +432,8 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
                     ),
                     const Spacer(),
                     Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration:
                           AppTheme.statusBadgeDecoration(AppTheme.textMuted),
                       child: Text(
@@ -691,11 +690,12 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     final syncAt = widget.syncTimestamps?[filePath];
     final validationAt = widget.validationTimestamps?[filePath];
     final isUnsaved = _isUnsaved(filePath);
-    final isValidated =
-        validationAt != null && (updateAt == null || !validationAt.isBefore(updateAt));
+    final isValidated = validationAt != null &&
+        (updateAt == null || !validationAt.isBefore(updateAt));
     final isSynced =
         syncAt != null && (updateAt == null || !syncAt.isBefore(updateAt));
-    final isAiTouched = widget.aiTouchedTimestamps?.containsKey(filePath) ?? false;
+    final isAiTouched =
+        widget.aiTouchedTimestamps?.containsKey(filePath) ?? false;
 
     if (isAiTouched) {
       badges.add(_buildChip(
