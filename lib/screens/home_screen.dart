@@ -84,7 +84,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _projectsError;
   Timer? _projectsDebounce;
   String? _lastFetchedApiToken;
-  bool _projectSearchListenerAttached = false;
 
   // Project name for display in recent projects list
   String _projectName = "";
@@ -456,6 +455,16 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _attachProjectSearchController(TextEditingController controller) {
+    if (identical(_projectSearchController, controller)) {
+      return;
+    }
+
+    _projectSearchController?.removeListener(_handleProjectSearchChanged);
+    _projectSearchController = controller;
+    _projectSearchController?.addListener(_handleProjectSearchChanged);
+  }
+
   Future<void> _loadProjectsForApiKey(String apiToken) async {
     if (_lastFetchedApiToken == apiToken && _availableProjects.isNotEmpty) {
       return;
@@ -477,6 +486,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _isFetchingProjects = false;
         _lastFetchedApiToken = apiToken;
       });
+
+      if (!mounted) return;
 
       await PreferencesManager.saveApiKey(apiToken);
     } catch (e) {
@@ -500,13 +511,18 @@ class _HomeScreenState extends State<HomeScreen> {
       _generatedYamlMessage = 'Fetching YAML for ${project.name}...';
     });
 
-    _fetchProjectYaml();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_selectedProject?.id != project.id) return;
+      _fetchProjectYaml();
+    });
   }
 
   @override
   void dispose() {
     _projectIdController.dispose();
     _apiTokenController.dispose();
+    _projectSearchController?.removeListener(_handleProjectSearchChanged);
     _projectSearchController?.dispose();
     _projectsDebounce?.cancel();
 
@@ -521,9 +537,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // Save API token to shared preferences
   Future<void> _saveApiToken() async {
     final apiToken = _apiTokenController.text;
-    if (apiToken.isNotEmpty) {
-      await PreferencesManager.saveApiKey(apiToken);
-    }
+    if (!mounted || apiToken.isEmpty) return;
+
+    await PreferencesManager.saveApiKey(apiToken);
   }
 
   Future<void> _clearStoredCredentials() async {
@@ -1436,19 +1452,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           onSelected: _handleProjectSelection,
                           fieldViewBuilder: (context, textEditingController,
                               focusNode, onEditingComplete) {
-                            if (_projectSearchController !=
-                                textEditingController) {
-                              _projectSearchController
-                                  ?.removeListener(_handleProjectSearchChanged);
-                              _projectSearchController = textEditingController;
-                              _projectSearchListenerAttached = false;
-                            }
-
-                            if (!_projectSearchListenerAttached) {
-                              _projectSearchController
-                                  ?.addListener(_handleProjectSearchChanged);
-                              _projectSearchListenerAttached = true;
-                            }
+                            _attachProjectSearchController(
+                              textEditingController,
+                            );
 
                             return TextField(
                               controller: _projectSearchController,
