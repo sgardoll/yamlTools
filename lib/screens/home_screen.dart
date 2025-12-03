@@ -422,11 +422,33 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Save API token to shared preferences
-  Future<void> _saveApiToken() async {
-    final apiToken = _apiTokenController.text;
+  Future<bool> _saveApiToken() async {
+    final apiToken = _apiTokenController.text.trim();
     if (apiToken.isNotEmpty) {
-      await PreferencesManager.saveApiKey(apiToken);
+      return PreferencesManager.saveApiKey(apiToken);
     }
+    return false;
+  }
+
+  Future<String?> _resolveAndPersistApiToken() async {
+    final currentValue = _apiTokenController.text.trim();
+
+    if (currentValue.isNotEmpty) {
+      await PreferencesManager.saveApiKey(currentValue);
+      return currentValue;
+    }
+
+    final savedToken = await PreferencesManager.getApiKey();
+    if (savedToken != null && savedToken.isNotEmpty) {
+      if (mounted && _apiTokenController.text != savedToken) {
+        setState(() {
+          _apiTokenController.text = savedToken;
+        });
+      }
+      return savedToken;
+    }
+
+    return null;
   }
 
   Future<void> _clearStoredCredentials() async {
@@ -643,10 +665,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchProjectYaml() async {
-    final projectId = _projectIdController.text;
-    final apiToken = _apiTokenController.text;
+    final projectId = _projectIdController.text.trim();
+    final apiToken = await _resolveAndPersistApiToken();
 
-    if (projectId.isEmpty || apiToken.isEmpty) {
+    if (projectId.isEmpty || apiToken == null || apiToken.isEmpty) {
       setState(() {
         _generatedYamlMessage =
             'Error: Project ID and API Token cannot be empty.';
@@ -1289,6 +1311,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 8),
                         TextField(
                           controller: _apiTokenController,
+                          onChanged: (_) => _saveApiToken(),
                           decoration: AppTheme.inputDecoration(
                             hintText: 'Enter your FlutterFlow API token',
                             prefixIcon: const Icon(Icons.key),
