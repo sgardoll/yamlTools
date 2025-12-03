@@ -1590,7 +1590,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   onProjectSelected: _handleProjectSelected,
                                   showHeader: false,
                                   maxItems: 3,
-                                  enableSearch: true,
+                                  enableSearch: false,
                                 ),
                               ),
                             ),
