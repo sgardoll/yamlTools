@@ -4,6 +4,27 @@ import 'package:http/http.dart' as http;
 import 'package:archive/archive.dart';
 import 'yaml_file_utils.dart';
 
+class ProjectSummary {
+  final String id;
+  final String name;
+
+  const ProjectSummary({required this.id, required this.name});
+
+  factory ProjectSummary.fromJson(Map<String, dynamic> json) {
+    final id = (json['projectId'] ?? json['id'] ?? '').toString();
+    final name = (json['name'] ?? json['projectName'] ?? 'Untitled Project')
+        .toString();
+
+    if (id.isEmpty) {
+      throw const FlutterFlowApiException(
+        message: 'Projects API returned an item without an id.',
+      );
+    }
+
+    return ProjectSummary(id: id, name: name.isNotEmpty ? name : id);
+  }
+}
+
 class FlutterFlowApiService {
   static const String baseUrl = 'https://api.flutterflow.io/v2';
   static final Map<String, String> _fileKeyCache = {};
@@ -61,6 +82,77 @@ class FlutterFlowApiService {
       message: message,
       note: note,
     );
+  }
+
+  /// Loads the projects available to the authenticated user.
+  static Future<List<ProjectSummary>> fetchProjects({
+    required String apiToken,
+  }) async {
+    if (apiToken.isEmpty) {
+      throw const FlutterFlowApiException(
+        message: 'API token cannot be empty when loading projects.',
+      );
+    }
+
+    final uri = Uri.parse('$baseUrl/projects');
+    debugPrint('Fetching projects via: $uri');
+
+    http.Response? response;
+    try {
+      response = await http.get(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $apiToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
+    } catch (e) {
+      throw FlutterFlowApiException(
+        endpoint: uri.toString(),
+        message: 'Network error while loading projects: $e',
+        isNetworkError: true,
+      );
+    }
+
+    if (response.statusCode != 200) {
+      throw buildApiException(
+        endpoint: uri.toString(),
+        response: response,
+        note: 'Failed to load projects',
+      );
+    }
+
+    try {
+      final dynamic decoded = jsonDecode(response.body);
+      final dynamic projectList = decoded is Map<String, dynamic>
+          ? (decoded['projects'] ?? decoded['value'] ?? decoded['data'])
+          : decoded;
+
+      if (projectList is! List) {
+        throw const FlutterFlowApiException(
+          message: 'Projects API response did not include a projects list.',
+        );
+      }
+
+      final projects = projectList
+          .whereType<Map<String, dynamic>>()
+          .map(ProjectSummary.fromJson)
+          .toList();
+
+      projects.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+
+      return projects;
+    } on FlutterFlowApiException {
+      rethrow;
+    } catch (e) {
+      throw FlutterFlowApiException(
+        endpoint: uri.toString(),
+        message: 'Unable to parse projects response: $e',
+      );
+    }
   }
 
   /// Helper method to create a base64 encoded zip from file content map
