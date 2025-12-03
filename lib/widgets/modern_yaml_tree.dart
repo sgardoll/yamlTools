@@ -83,6 +83,11 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   Map<String, String> _pageDisplayNames = {};
   String _searchQuery = '';
 
+  final TextEditingController _searchController = TextEditingController();
+  Map<String, String> _pageDisplayNames = {};
+  String _searchQuery = '';
+  bool _unsavedSectionExpanded = true;
+
   @override
   void initState() {
     super.initState();
@@ -459,6 +464,20 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     return selfMatches || hasMatchingChildren;
   }
 
+  bool _filterTree(TreeNode node) {
+    if (node.children.isEmpty) {
+      return node.name.toLowerCase().contains(_searchQuery);
+    }
+    node.children.removeWhere((child) => !_filterTree(child));
+    bool selfMatches = node.name.toLowerCase().contains(_searchQuery);
+    bool hasMatchingChildren = node.children.isNotEmpty;
+    if (hasMatchingChildren) {
+      String nodeIdentifier = '${node.type}_${node.name}';
+      _expandedNodes.add(nodeIdentifier);
+    }
+    return selfMatches || hasMatchingChildren;
+  }
+
   NodeType _determineNodeType(String pathPart, bool isLeaf) {
     if (pathPart.startsWith('id-') && isLeaf) {
       return NodeType.leaf;
@@ -599,6 +618,100 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     );
   }
 
+  Widget _buildUnsavedSection() {
+    final unsavedFiles = widget.yamlFiles.keys.where(_isFileUnsaved).toList();
+
+    if (unsavedFiles.isEmpty) {
+      return SizedBox.shrink();
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.orange.withOpacity(0.05),
+        border: Border(bottom: BorderSide(color: Colors.orange.withOpacity(0.2))),
+      ),
+      child: Column(
+        children: [
+          // Header
+          InkWell(
+            onTap: () {
+               setState(() {
+                 _unsavedSectionExpanded = !_unsavedSectionExpanded;
+               });
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, size: 14, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Unsaved Files (${unsavedFiles.length})',
+                    style: TextStyle(
+                      color: Colors.orange,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    _unsavedSectionExpanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 16,
+                    color: Colors.orange,
+                  )
+                ],
+              ),
+            ),
+          ),
+
+          // List
+          if (_unsavedSectionExpanded)
+             ...unsavedFiles.map((filePath) {
+               // Determine icon and name simply
+               String name = filePath.split('/').last;
+               // Try to find the tree node for better name?
+               // Creating a temporary node might be expensive if logic is complex.
+               // We'll parse quickly or just show path.
+               // Let's stick to simple filename for now, or match tree node logic if possible.
+               // We can re-use _parseWidgetInfo logic partially.
+
+               return InkWell(
+                 onTap: () => widget.onFileSelected?.call(filePath),
+                 child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    color: filePath == _selectedFilePath
+                        ? Colors.orange.withOpacity(0.1)
+                        : Colors.transparent,
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 24), // Indent to match header text
+                        Icon(Icons.insert_drive_file, size: 14, color: Colors.orange.withOpacity(0.7)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: TextStyle(
+                              color: filePath == _selectedFilePath ? Colors.orange : AppTheme.textPrimary,
+                              fontSize: 13,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                 ),
+               );
+             }).toList(),
+
+          if (_unsavedSectionExpanded)
+             const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _buildNodeChildren(TreeNode node, int depth) {
     List<Widget> widgets = [];
     if (node.type != NodeType.root) {
@@ -619,6 +732,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     bool isExpanded = _expandedNodes.contains(nodeIdentifier);
     bool isSelected = node.filePath == _selectedFilePath;
     bool hasChildren = node.children.isNotEmpty;
+    bool isUnsaved = node.filePath != null && _isFileUnsaved(node.filePath!);
 
     IconData icon = _getNodeIcon(node);
     Color iconColor = _getNodeColor(node);
