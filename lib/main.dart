@@ -67,7 +67,7 @@ class MyApp extends StatelessWidget {
           error: AppTheme.errorColor,
         ),
         scaffoldBackgroundColor: AppTheme.backgroundColor,
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           color: AppTheme.surfaceColor,
           elevation: 0,
           shape: RoundedRectangleBorder(
