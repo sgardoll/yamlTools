@@ -7,6 +7,8 @@ import '../storage/preferences_manager.dart';
 import '../services/flutterflow_api_service.dart';
 import '../services/yaml_file_utils.dart';
 
+enum OperationStatus { idle, success, failure }
+
 class YamlContentViewer extends StatefulWidget {
   final String? content;
   final int? characterCount;
@@ -59,6 +61,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
   bool _isValidating = false;
   bool _isUpdating = false;
   bool _hasUnsavedChanges = false; // Track unsaved changes
+  OperationStatus _lastValidationStatus = OperationStatus.idle;
+  OperationStatus _lastSaveStatus = OperationStatus.idle;
   String? _validationError;
   bool _isValid = true;
   String? _lastValidatedFileKey;
@@ -93,6 +97,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         _isValid = true;
         _hasUnsavedChanges = false;
         _lastValidatedFileKey = null;
+        _lastValidationStatus = OperationStatus.idle;
+        _lastSaveStatus = OperationStatus.idle;
       });
     }
 
@@ -103,6 +109,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         _lastValidatedFileKey = null;
         _findController.clear();
         _replaceController.clear();
+        _lastValidationStatus = OperationStatus.idle;
+        _lastSaveStatus = OperationStatus.idle;
       });
     }
   }
@@ -127,6 +135,10 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     if (hasChanges != _hasUnsavedChanges) {
       setState(() {
         _hasUnsavedChanges = hasChanges;
+        if (hasChanges) {
+          _lastValidationStatus = OperationStatus.idle;
+          _lastSaveStatus = OperationStatus.idle;
+        }
         // Clear validation error when user starts typing
         if (hasChanges && _validationError != null) {
           _validationError = null;
@@ -146,6 +158,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
     setState(() {
       _isValidating = true;
       _validationError = null;
+      _lastValidationStatus = OperationStatus.idle;
     });
 
     try {
@@ -156,6 +169,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           _isValid = false;
           _validationError =
               '🔑 API token missing. Please set your FlutterFlow API token in settings.';
+          _lastValidationStatus = OperationStatus.failure;
         });
         return;
       }
@@ -187,6 +201,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
               '• This file is not recognized by FlutterFlow.\n'
               '💡 Tip: This file may not be directly editable via the API.\n'
               '  Try editing the parent file instead (e.g., page-widget-tree-outline.yaml).';
+          _lastValidationStatus = OperationStatus.failure;
         });
         return;
       }
@@ -207,6 +222,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             _isValid = true;
             _validationError = null;
             _lastValidatedFileKey = fileKey;
+            _lastValidationStatus = OperationStatus.success;
           });
         } else {
           final errors = (result['errors'] as List?)?.cast<String>() ?? [];
@@ -219,6 +235,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
               yamlContent: content,
               currentFilePath: widget.filePath,
             );
+            _lastValidationStatus = OperationStatus.failure;
           });
         }
       } catch (e) {
@@ -239,6 +256,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
              } else {
                _validationError = e.message.isNotEmpty ? e.message : 'Validation failed with status ${e.statusCode}';
              }
+            _lastValidationStatus = OperationStatus.failure;
            });
            return;
         }
@@ -250,6 +268,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
         _isValid = false;
         _validationError =
             '🌐 Network error: Unable to connect to FlutterFlow API. Check your internet connection.';
+        _lastValidationStatus = OperationStatus.failure;
       });
     } finally {
       setState(() {
@@ -267,6 +286,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
 
     setState(() {
       _isUpdating = true;
+      _lastSaveStatus = OperationStatus.idle;
     });
 
     String effectiveFilePath = widget.filePath;
@@ -281,6 +301,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
           _validationError =
               '🔑 API token missing for update. Please set your FlutterFlow API token.';
           _isValid = false;
+          _lastSaveStatus = OperationStatus.failure;
         });
         return;
       }
@@ -376,6 +397,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       setState(() {
         _validationError = null;
         _isValid = true;
+        _lastSaveStatus = OperationStatus.success;
       });
 
       // Notify that the file was updated via API
@@ -453,6 +475,7 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       setState(() {
         _validationError = userFriendlyError;
         _isValid = false;
+        _lastSaveStatus = OperationStatus.failure;
       });
     } finally {
       setState(() {
@@ -716,6 +739,10 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       setState(() {
         _hasUnsavedChanges = false;
         _isEditing = false;
+        _lastValidationStatus = OperationStatus.idle;
+        _lastSaveStatus = OperationStatus.idle;
+        _validationError = null;
+        _isValid = true;
       });
       return;
     }
@@ -725,6 +752,10 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       _textController.text = widget.content ?? '';
       _hasUnsavedChanges = false;
       _isEditing = false;
+      _lastValidationStatus = OperationStatus.idle;
+      _lastSaveStatus = OperationStatus.idle;
+      _validationError = null;
+      _isValid = true;
     });
   }
 
@@ -912,6 +943,8 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
             ],
           ),
 
+          const SizedBox(height: 8),
+          _buildStatusChips(),
           const SizedBox(height: 12),
 
           // Second row - Action buttons (wrapped for overflow)
@@ -971,6 +1004,136 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
               padding: const EdgeInsets.only(top: 12),
               child: _buildFindReplaceBar(),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusChips() {
+    final chips = <Widget>[];
+    final hasLocalEdits = _hasUnsavedChanges || widget.hasPendingLocalEdits;
+
+    if (hasLocalEdits) {
+      chips.add(
+        _statusChip(
+          label: 'Unsaved changes',
+          color: AppTheme.warningColor.withOpacity(0.15),
+          borderColor: AppTheme.warningColor,
+          icon: Icons.edit,
+        ),
+      );
+    }
+
+    if (_isValidating) {
+      chips.add(
+        _statusChip(
+          label: 'Validating...',
+          color: AppTheme.warningColor.withOpacity(0.12),
+          borderColor: AppTheme.warningColor,
+          showSpinner: true,
+        ),
+      );
+    } else if (_lastValidationStatus == OperationStatus.failure ||
+        _validationError != null) {
+      chips.add(
+        _statusChip(
+          label: 'Validation failed',
+          color: AppTheme.errorColor.withOpacity(0.12),
+          borderColor: AppTheme.errorColor,
+          icon: Icons.error_outline,
+        ),
+      );
+    } else if (_lastValidationStatus == OperationStatus.success) {
+      chips.add(
+        _statusChip(
+          label: 'Validated',
+          color: AppTheme.validColor.withOpacity(0.12),
+          borderColor: AppTheme.validColor,
+          icon: Icons.verified,
+        ),
+      );
+    }
+
+    if (_isUpdating) {
+      chips.add(
+        _statusChip(
+          label: 'Saving...',
+          color: AppTheme.primaryColor.withOpacity(0.12),
+          borderColor: AppTheme.primaryColor,
+          showSpinner: true,
+        ),
+      );
+    } else if (_lastSaveStatus == OperationStatus.failure) {
+      chips.add(
+        _statusChip(
+          label: 'Save failed',
+          color: AppTheme.errorColor.withOpacity(0.12),
+          borderColor: AppTheme.errorColor,
+          icon: Icons.cloud_off,
+        ),
+      );
+    } else if (_lastSaveStatus == OperationStatus.success) {
+      chips.add(
+        _statusChip(
+          label: 'Saved to FlutterFlow',
+          color: AppTheme.successColor.withOpacity(0.12),
+          borderColor: AppTheme.successColor,
+          icon: Icons.cloud_done,
+        ),
+      );
+    }
+
+    if (chips.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        children: chips,
+      ),
+    );
+  }
+
+  Widget _statusChip({
+    required String label,
+    required Color color,
+    required Color borderColor,
+    IconData? icon,
+    bool showSpinner = false,
+  }) {
+    final textColor = borderColor;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor.withOpacity(0.6)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showSpinner)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(textColor),
+              ),
+            )
+          else if (icon != null)
+            Icon(icon, size: 14, color: textColor),
+          if (icon != null || showSpinner) const SizedBox(width: 6),
+          Text(
+            label,
+            style: AppTheme.captionLarge.copyWith(
+              color: textColor,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
