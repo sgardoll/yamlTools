@@ -18,17 +18,19 @@ void main() {
 
     test('convertFileNamesToKeys should convert map correctly', () {
       final input = {
-        'ad-mob.yaml': 'content1',
-        'project.yaml': 'content2',
-        'test.yml': 'content3',
-        'no-extension': 'content4',
+        'archive_pages/home.yaml': 'content1',
+        'archive_custom_actions/auth.yaml': 'content2',
+        'custom_actions/branch.yml': 'content3',
+        'theme/colors.yaml': 'content4',
+        'pages/id-Scaffold_123/page-widget-tree-outline.yaml': 'content5',
       };
 
       final expected = {
-        'ad-mob': 'content1',
-        'project': 'content2',
-        'test': 'content3',
-        'no-extension': 'content4',
+        'page/home': 'content1',
+        'customAction/auth': 'content2',
+        'customAction/branch': 'content3',
+        'theme/colors': 'content4',
+        'page/id-Scaffold_123/page-widget-tree-outline': 'content5',
       };
 
       final result = FlutterFlowApiService.convertFileNamesToKeys(input);
@@ -46,9 +48,24 @@ void main() {
         equals('page/id-123'),
       );
       expect(
+        FlutterFlowApiService.getFileKey('archive_pages/home.yaml'),
+        equals('page/home'),
+      );
+      expect(
         FlutterFlowApiService
             .getFileKey('archive_page/id-123/page-widget-tree-outline.yaml'),
         equals('page/id-123/page-widget-tree-outline'),
+      );
+    });
+
+    test('getFileKey should normalize custom action paths', () {
+      expect(
+        FlutterFlowApiService.getFileKey('archive_custom_actions/login.yaml'),
+        equals('customAction/login'),
+      );
+      expect(
+        FlutterFlowApiService.getFileKey('custom_actions/login.yml'),
+        equals('customAction/login'),
       );
     });
 
@@ -71,6 +88,24 @@ page:
       expect(candidates, contains('archive_page/id-Scaffold_hur6kpbk'));
       expect(
           candidates, contains('archive_page/id-Scaffold_hur6kpbk.yaml'));
+    });
+
+    test('buildFileKeyCandidates should cover archive/customAction variants',
+        () {
+      final candidates = FlutterFlowApiService.buildFileKeyCandidates(
+        filePath: 'archive_custom_actions/login.yaml',
+        yamlContent: null,
+      );
+
+      expect(
+        candidates,
+        containsAll([
+          'archive_customAction/login',
+          'archive_customAction/login.yaml',
+          'customAction/login',
+          'customAction/login.yaml',
+        ]),
+      );
     });
   });
 }

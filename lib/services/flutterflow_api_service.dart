@@ -8,6 +8,16 @@ class FlutterFlowApiService {
   static const String baseUrl = 'https://api.flutterflow.io/v2';
   static final Map<String, String> _fileKeyCache = {};
   static final Map<_FileKeyScope, String> _formatPreferenceByScope = {};
+  static const Map<String, String> _folderPrefixMap = {
+    'pages': 'page',
+    'page': 'page',
+    'archive_page': 'page',
+    'archive_pages': 'page',
+    'custom_actions': 'customAction',
+    'custom-action': 'customAction',
+    'customAction': 'customAction',
+    'archive_custom_actions': 'customAction',
+  };
 
   /// A structured exception to preserve rich error details from the API
   /// so the UI can present actionable feedback (path, line/col, message).
@@ -59,7 +69,7 @@ class FlutterFlowApiService {
 
     fileKeyToContent.forEach((key, content) {
       // Ensure key has .yaml extension for the zip entry
-      String entryName = key;
+      String entryName = getFileKey(key);
       if (!entryName.toLowerCase().endsWith('.yaml') &&
           !entryName.toLowerCase().endsWith('.yml')) {
         entryName = '$entryName.yaml';
@@ -78,6 +88,38 @@ class FlutterFlowApiService {
     }
 
     return base64Encode(encodedBytes);
+  }
+
+  /// Maps known archive/plural folder prefixes to the canonical API folder
+  /// names (e.g., archive_pages/ -> page/, archive_custom_actions/ -> customAction/).
+  /// When [preserveArchivePrefix] is true, an archive_ prefix is retained
+  /// after mapping; otherwise it is removed.
+  static String _canonicalizeFolderPrefix(String filePath,
+      {bool preserveArchivePrefix = true}) {
+    if (filePath.isEmpty) return filePath;
+
+    var normalized = filePath.replaceAll('\\', '/');
+    if (normalized.startsWith('/')) {
+      normalized = normalized.substring(1);
+    }
+
+    final hasArchivePrefix = normalized.startsWith('archive_');
+    var withoutArchive =
+        hasArchivePrefix ? normalized.substring(8) : normalized;
+
+    final firstSlash = withoutArchive.indexOf('/');
+    final prefix = firstSlash == -1
+        ? withoutArchive
+        : withoutArchive.substring(0, firstSlash);
+    final rest = firstSlash == -1 ? '' : withoutArchive.substring(firstSlash);
+
+    final mappedPrefix = _folderPrefixMap[prefix] ?? prefix;
+    final rebuilt =
+        (preserveArchivePrefix && hasArchivePrefix ? 'archive_' : '') +
+            mappedPrefix +
+            rest;
+
+    return rebuilt;
   }
 
   /// Validates the YAML files in a FlutterFlow project using the Zip approach.
@@ -171,8 +213,15 @@ class FlutterFlowApiService {
       throw ArgumentError('File content map cannot be empty');
     }
 
+    // Canonicalize file keys (strip extensions/archive prefixes) before zipping
+    final canonical = <String, String>{};
+    fileKeyToContent.forEach((rawKey, content) {
+      final normalizedKey = getFileKey(rawKey);
+      canonical[normalizedKey] = content;
+    });
+
     // Create Base64 Encoded Zip
-    final yamlContent = _createProjectZip(fileKeyToContent);
+    final yamlContent = _createProjectZip(canonical);
 
     final body = jsonEncode({
       'projectId': projectId,
@@ -180,7 +229,7 @@ class FlutterFlowApiService {
     });
 
     debugPrint('Updating project YAML for project: $projectId');
-    debugPrint('Files to update: ${fileKeyToContent.keys.join(', ')}');
+    debugPrint('Files to update: ${canonical.keys.join(', ')}');
 
     try {
       // Primary endpoint per updated FlutterFlow API docs
@@ -207,13 +256,35 @@ class FlutterFlowApiService {
         try {
           final decoded = jsonDecode(primaryResponse.body);
           if (decoded is Map<String, dynamic>) {
-            final rawSuccess = decoded['success'];
-            if (rawSuccess is bool) {
-              successFlag = rawSuccess;
+            bool? extractSuccess(dynamic value) {
+              if (value is bool) return value;
+              if (value is String) {
+                final lower = value.toLowerCase();
+                if (lower == 'true') return true;
+                if (lower == 'false') return false;
+              }
+              if (value is Map<String, dynamic>) {
+                final direct = extractSuccess(value['success']);
+                if (direct != null) return direct;
+                return extractSuccess(value['value']);
+              }
+              return null;
             }
-            responseReason =
-                (decoded['reason'] ?? decoded['message'] ?? decoded['error'])
-                    ?.toString();
+
+            String? extractReason(dynamic value) {
+              if (value is Map<String, dynamic>) {
+                final reason =
+                    value['reason'] ?? value['message'] ?? value['error'];
+                if (reason != null && reason.toString().isNotEmpty) {
+                  return reason.toString();
+                }
+                return extractReason(value['value']);
+              }
+              return null;
+            }
+
+            successFlag = extractSuccess(decoded);
+            responseReason = extractReason(decoded);
           }
         } catch (parseError) {
           debugPrint('Unable to parse update response JSON: $parseError');
@@ -222,7 +293,10 @@ class FlutterFlowApiService {
         // FlutterFlow can return HTTP 200 with success=false when it rejects the
         // update (e.g., invalid file key or schema error). Surface that instead
         // of silently treating the call as successful.
-        if (successFlag == false) {
+        final updateRejected = successFlag == false ||
+            (successFlag != true && (responseReason?.isNotEmpty ?? false));
+
+        if (updateRejected) {
           throw buildApiException(
             endpoint: primaryUri.toString(),
             response: primaryResponse,
@@ -366,12 +440,13 @@ class FlutterFlowApiService {
   }
 
   static String _normalizeArchivePath(String filePath) {
-    var normalized = filePath.replaceAll('\\', '/');
-    if (normalized.startsWith('archive_')) {
-      normalized = normalized.substring(8);
-    }
+    var normalized = _canonicalizeFolderPrefix(
+      filePath.replaceAll('\\', '/'),
+      preserveArchivePrefix: false,
+    );
     // Collapse repeated extensions
-    normalized = normalized.replaceFirst(RegExp(r'(\\.ya?ml)+$', caseSensitive: false), '.yaml');
+    normalized = normalized.replaceFirst(
+        RegExp(r'(\\.ya?ml)+$', caseSensitive: false), '.yaml');
     return normalized.startsWith('/') ? normalized.substring(1) : normalized;
   }
 
@@ -396,10 +471,15 @@ class FlutterFlowApiService {
     return '$normalized.yaml';
   }
 
-  static String _normalizeForCandidates(String filePath) {
+  static String _normalizeForCandidates(String filePath,
+      {bool canonicalizeFolders = true}) {
     var normalized = filePath.trim().replaceAll('\\', '/');
     if (normalized.startsWith('/')) {
       normalized = normalized.substring(1);
+    }
+    if (canonicalizeFolders) {
+      normalized =
+          _canonicalizeFolderPrefix(normalized, preserveArchivePrefix: true);
     }
     normalized = normalized.replaceFirst(
       RegExp(r'(\\.ya?ml)+$', caseSensitive: false),
@@ -416,7 +496,10 @@ class FlutterFlowApiService {
   }
 
   static String _stripArchivePrefix(String filePath) {
-    final normalized = _normalizeForCandidates(filePath);
+    final normalized = _normalizeForCandidates(
+      filePath,
+      canonicalizeFolders: true,
+    );
     return normalized.startsWith('archive_')
         ? normalized.substring(8)
         : normalized;
@@ -488,10 +571,12 @@ class FlutterFlowApiService {
     required String fileKey,
     required String content,
   }) async {
+    final normalizedKey = getFileKey(fileKey);
+
     // Probe using the same zip-based payload we use for real validation/updates
     // to avoid false positives from the legacy fileKey/fileContent shape.
     final uri = Uri.parse('$baseUrl/validateProjectYaml');
-    final yamlContent = _createProjectZip({fileKey: content});
+    final yamlContent = _createProjectZip({normalizedKey: content});
     final payload = jsonEncode({'projectId': projectId, 'yamlContent': yamlContent});
 
     debugPrint('Validation probe payload for "$fileKey": $payload');
@@ -587,10 +672,11 @@ class FlutterFlowApiService {
       );
 
       if (works) {
-        debugPrint('✅ Working key found: "$candidate"');
-        _fileKeyCache[cacheKey] = candidate;
+        final canonicalKey = getFileKey(candidate);
+        debugPrint('✅ Working key found: "$canonicalKey" (from "$candidate")');
+        _fileKeyCache[cacheKey] = canonicalKey;
         _rememberFormatPreference(filePath, candidate);
-        return candidate;
+        return canonicalKey;
       } else {
         debugPrint('❌ Key failed: "$candidate"');
       }

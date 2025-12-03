@@ -7,6 +7,17 @@ import 'package:yaml/yaml.dart';
 class YamlFileUtils {
   const YamlFileUtils._();
 
+  static const Map<String, String> _folderPrefixMap = {
+    'pages': 'page',
+    'page': 'page',
+    'archive_pages': 'page',
+    'archive_page': 'page',
+    'custom_actions': 'customAction',
+    'custom-action': 'customAction',
+    'customAction': 'customAction',
+    'archive_custom_actions': 'customAction',
+  };
+
   /// Attempts to infer the canonical FlutterFlow file path (including the
   /// directory prefix and `.yaml` extension) from the provided YAML content.
   ///
@@ -145,6 +156,7 @@ class YamlFileUtils {
     if (path.startsWith('archive_')) {
       path = path.substring(8);
     }
+    path = _canonicalizeFolderPrefix(path);
 
     // Ensure only one extension at the end
     path = path.replaceFirst(RegExp(r'(\\.ya?ml)+$', caseSensitive: false), '.yaml');
@@ -167,6 +179,17 @@ class YamlFileUtils {
       apiFileKey: apiFileKey,
       expectedYamlKey: expectedKey,
     );
+  }
+
+  static String _canonicalizeFolderPrefix(String path) {
+    if (path.isEmpty) return path;
+
+    final firstSlash = path.indexOf('/');
+    final prefix =
+        firstSlash == -1 ? path : path.substring(0, firstSlash);
+    final rest = firstSlash == -1 ? '' : path.substring(firstSlash);
+    final mapped = _folderPrefixMap[prefix] ?? prefix;
+    return '$mapped$rest';
   }
 
   static String? _folderForSection(String sectionKey) {
