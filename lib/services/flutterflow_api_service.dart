@@ -33,7 +33,12 @@ class FlutterFlowApiService {
 
       // Prefer structured fields
       if (jsonBody != null) {
-        message = (jsonBody['error'] ?? jsonBody['message'] ?? body ?? '').toString();
+        message = (jsonBody['error'] ??
+                jsonBody['message'] ??
+                jsonBody['reason'] ??
+                body ??
+                '')
+            .toString();
       } else {
         message = body ?? 'HTTP $status error';
       }
@@ -196,6 +201,36 @@ class FlutterFlowApiService {
       debugPrint('Primary update response body: ${primaryResponse.body}');
 
       if (primaryResponse.statusCode == 200) {
+        bool? successFlag;
+        String? responseReason;
+
+        try {
+          final decoded = jsonDecode(primaryResponse.body);
+          if (decoded is Map<String, dynamic>) {
+            final rawSuccess = decoded['success'];
+            if (rawSuccess is bool) {
+              successFlag = rawSuccess;
+            }
+            responseReason =
+                (decoded['reason'] ?? decoded['message'] ?? decoded['error'])
+                    ?.toString();
+          }
+        } catch (parseError) {
+          debugPrint('Unable to parse update response JSON: $parseError');
+        }
+
+        // FlutterFlow can return HTTP 200 with success=false when it rejects the
+        // update (e.g., invalid file key or schema error). Surface that instead
+        // of silently treating the call as successful.
+        if (successFlag == false) {
+          throw buildApiException(
+            endpoint: primaryUri.toString(),
+            response: primaryResponse,
+            note: responseReason ??
+                'Update rejected by FlutterFlow (success=false in response).',
+          );
+        }
+
         debugPrint('Successfully updated project YAML via primary endpoint');
         return true;
       }
@@ -453,14 +488,13 @@ class FlutterFlowApiService {
     required String fileKey,
     required String content,
   }) async {
+    // Probe using the same zip-based payload we use for real validation/updates
+    // to avoid false positives from the legacy fileKey/fileContent shape.
     final uri = Uri.parse('$baseUrl/validateProjectYaml');
-    final payload = {
-      'projectId': projectId,
-      'fileKey': fileKey,
-      'fileContent': content,
-    };
+    final yamlContent = _createProjectZip({fileKey: content});
+    final payload = jsonEncode({'projectId': projectId, 'yamlContent': yamlContent});
 
-    debugPrint('Validation probe payload for "$fileKey": ${jsonEncode(payload)}');
+    debugPrint('Validation probe payload for "$fileKey": $payload');
 
     try {
       final response = await http.post(
@@ -470,13 +504,13 @@ class FlutterFlowApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: jsonEncode(payload),
+        body: payload,
       );
 
       debugPrint(
           'Validation probe response (${response.statusCode}) for "$fileKey": ${response.body}');
 
-      // 200 = accepted, 400 = format accepted but content invalid.
+      // 200 = accepted (success true/false), 400 = format accepted but content invalid.
       return response.statusCode == 200 || response.statusCode == 400;
     } catch (e) {
       debugPrint('Validation probe threw for "$fileKey": $e');
