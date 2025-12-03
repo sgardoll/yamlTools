@@ -44,7 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _rawFetchedYaml;
   Map<String, dynamic>? _parsedYamlMap;
   String _generatedYamlMessage =
-      "Enter Project ID and API Token, then click 'Fetch YAML'."; // Initial message
+      "Add your FlutterFlow API key and pick a project to load its YAML."; // Initial message
   String _operationMessage = ""; // For status messages like "Page created"
 
   // Map to store separate YAML files for export
@@ -76,6 +76,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final _projectIdController = TextEditingController();
   final _apiTokenController = TextEditingController();
+  TextEditingController? _projectSearchController;
+
+  List<FlutterFlowProject> _availableProjects = [];
+  FlutterFlowProject? _selectedProject;
+  bool _isFetchingProjects = false;
+  String? _projectsError;
+  Timer? _projectsDebounce;
+  String? _lastFetchedApiToken;
 
   // Project name for display in recent projects list
   String _projectName = "";
@@ -393,7 +401,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _projectIdController.addListener(() => setState(() {}));
-    _apiTokenController.addListener(() => setState(() {}));
+    _apiTokenController.addListener(_handleApiTokenChanged);
 
     // Load saved API token
     _loadSavedApiToken();
@@ -406,13 +414,119 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _apiTokenController.text = savedApiToken;
       });
+      await _loadProjectsForApiKey(savedApiToken);
     }
+  }
+
+  void _handleApiTokenChanged() {
+    final apiToken = _apiTokenController.text.trim();
+    _projectsDebounce?.cancel();
+
+    setState(() {
+      _projectsError = null;
+      _selectedProject = null;
+      _projectIdController.clear();
+      _projectSearchController?.clear();
+
+      if (apiToken.isEmpty) {
+        _availableProjects = [];
+        _isFetchingProjects = false;
+        _lastFetchedApiToken = null;
+      }
+    });
+
+    if (apiToken.isEmpty) {
+      return;
+    }
+
+    _projectsDebounce = Timer(const Duration(milliseconds: 450), () {
+      _loadProjectsForApiKey(apiToken);
+    });
+  }
+
+  void _handleProjectSearchChanged() {
+    if (_projectSearchController != null &&
+        _projectSearchController!.text.isEmpty &&
+        _selectedProject != null) {
+      setState(() {
+        _selectedProject = null;
+        _projectIdController.clear();
+      });
+    }
+  }
+
+  void _attachProjectSearchController(TextEditingController controller) {
+    if (identical(_projectSearchController, controller)) {
+      return;
+    }
+
+    _projectSearchController?.removeListener(_handleProjectSearchChanged);
+    _projectSearchController = controller;
+    _projectSearchController?.addListener(_handleProjectSearchChanged);
+  }
+
+  Future<void> _loadProjectsForApiKey(String apiToken) async {
+    if (_lastFetchedApiToken == apiToken && _availableProjects.isNotEmpty) {
+      return;
+    }
+
+    setStateIfMounted(() {
+      _isFetchingProjects = true;
+      _projectsError = null;
+      _availableProjects = [];
+      _selectedProject = null;
+    });
+
+    try {
+      final projects =
+          await FlutterFlowApiService.fetchProjects(apiToken: apiToken);
+
+      setStateIfMounted(() {
+        _availableProjects = projects;
+        _isFetchingProjects = false;
+        _lastFetchedApiToken = apiToken;
+      });
+
+      if (!mounted) return;
+
+      if (mounted) {
+        await PreferencesManager.saveApiKey(apiToken);
+      }
+    } catch (e) {
+      final errorMessage = e is FlutterFlowApiException
+          ? e.message
+          : 'Failed to load projects: $e';
+
+      setStateIfMounted(() {
+        _isFetchingProjects = false;
+        _projectsError = errorMessage;
+      });
+    }
+  }
+
+  void _handleProjectSelection(FlutterFlowProject project) {
+    setState(() {
+      _selectedProject = project;
+      _projectIdController.text = project.id;
+      _projectName = project.name;
+      _projectSearchController?.text = '${project.name} (${project.id})';
+      _generatedYamlMessage = 'Fetching YAML for ${project.name}...';
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_selectedProject?.id != project.id) return;
+      _fetchProjectYaml();
+    });
   }
 
   @override
   void dispose() {
     _projectIdController.dispose();
     _apiTokenController.dispose();
+    _projectSearchController?.removeListener(_handleProjectSearchChanged);
+    _projectSearchController?.dispose();
+    _projectsDebounce?.cancel();
 
     // Dispose of all file content controllers
     _fileControllers.forEach((fileName, controller) {
@@ -425,9 +539,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // Save API token to shared preferences
   Future<void> _saveApiToken() async {
     final apiToken = _apiTokenController.text;
-    if (apiToken.isNotEmpty) {
-      await PreferencesManager.saveApiKey(apiToken);
-    }
+    if (!mounted || apiToken.isEmpty) return;
+
+    await PreferencesManager.saveApiKey(apiToken);
   }
 
   Future<void> _clearStoredCredentials() async {
@@ -436,6 +550,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       _apiTokenController.clear();
+      _projectSearchController?.clear();
+      _availableProjects.clear();
+      _selectedProject = null;
+      _projectIdController.clear();
     });
 
     final messenger = ScaffoldMessenger.of(context);
@@ -456,11 +574,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       _projectIdController.text = projectId;
+      _selectedProject = FlutterFlowProject(
+        id: projectId,
+        name: 'Project $projectId',
+      );
+      _projectSearchController?.text = 'Project $projectId';
       if (savedApiToken != null && savedApiToken.isNotEmpty) {
         _apiTokenController.text = savedApiToken;
       }
       _showRecentProjects = false;
     });
+
+    _fetchProjectYaml();
   }
 
   // Apply changes to a file and update modification tracking
@@ -650,7 +775,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (projectId.isEmpty || apiToken.isEmpty) {
       setState(() {
         _generatedYamlMessage =
-            'Error: Project ID and API Token cannot be empty.';
+            'Error: Choose a project and provide your API key to continue.';
       });
       return;
     }
@@ -1204,9 +1329,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Widget to display when no project is loaded
   Widget _buildLoadProjectUI() {
-    // Determine if we have credentials filled in
-    bool hasCredentials = _projectIdController.text.isNotEmpty &&
-        _apiTokenController.text.isNotEmpty;
+    final hasApiKey = _apiTokenController.text.isNotEmpty;
+    final hasProjectOptions = _availableProjects.isNotEmpty;
+    final canSearchProjects = hasApiKey && !_isFetchingProjects;
 
     return Container(
       color: AppTheme.backgroundColor,
@@ -1233,7 +1358,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Enter your project credentials to get started',
+                      'Add your FlutterFlow API key to browse and load a project',
                       style: AppTheme.bodyLarge.copyWith(
                         color: AppTheme.textSecondary,
                       ),
@@ -1247,36 +1372,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Project ID field
+                    // API key field
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Project ID',
-                          style: AppTheme.bodyMedium.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _projectIdController,
-                          decoration: AppTheme.inputDecoration(
-                            hintText: 'Enter your FlutterFlow project ID',
-                            prefixIcon: const Icon(Icons.folder_outlined),
-                          ),
-                          style: AppTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // API Token field
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'API Token',
+                          'FlutterFlow API Key',
                           style: AppTheme.bodyMedium.copyWith(
                             fontWeight: FontWeight.w600,
                             color: AppTheme.textPrimary,
@@ -1286,84 +1387,145 @@ class _HomeScreenState extends State<HomeScreen> {
                         TextField(
                           controller: _apiTokenController,
                           decoration: AppTheme.inputDecoration(
-                            hintText: 'Enter your FlutterFlow API token',
-                            prefixIcon: const Icon(Icons.key),
+                            hintText: 'Paste your FlutterFlow API key',
+                            prefixIcon: const Icon(Icons.vpn_key_outlined),
                           ),
                           style: AppTheme.bodyMedium,
                           obscureText: true,
                         ),
                       ],
                     ),
+                    const SizedBox(height: 20),
+
+                    // Projects dropdown
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              'Project',
+                              style: AppTheme.bodyMedium.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            if (_isFetchingProjects)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        AppTheme.primaryColor),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Autocomplete<FlutterFlowProject>(
+                          displayStringForOption: (option) =>
+                              '${option.name} (${option.id})',
+                          optionsBuilder: (textEditingValue) {
+                            if (!canSearchProjects) {
+                              return const Iterable<FlutterFlowProject>.empty();
+                            }
+
+                            final query =
+                                textEditingValue.text.toLowerCase().trim();
+                            if (query.isEmpty) {
+                              return _availableProjects;
+                            }
+
+                            return _availableProjects.where((project) {
+                              final searchable =
+                                  '${project.name} ${project.id}'.toLowerCase();
+                              return searchable.contains(query);
+                            });
+                          },
+                          onSelected: _handleProjectSelection,
+                          fieldViewBuilder: (context, textEditingController,
+                              focusNode, onEditingComplete) {
+                            _attachProjectSearchController(
+                              textEditingController,
+                            );
+
+                            return TextField(
+                              controller: _projectSearchController,
+                              focusNode: focusNode,
+                              onEditingComplete: onEditingComplete,
+                              decoration: AppTheme.inputDecoration(
+                                hintText: hasApiKey
+                                    ? (hasProjectOptions
+                                        ? 'Search your FlutterFlow projects'
+                                        : 'No projects found for this API key')
+                                    : 'Add API key to load projects',
+                                prefixIcon: const Icon(Icons.search),
+                              ),
+                              enabled: hasApiKey,
+                              style: AppTheme.bodyMedium,
+                            );
+                          },
+                          optionsViewBuilder: (context, onSelected, options) {
+                            return Align(
+                              alignment: Alignment.topLeft,
+                              child: Material(
+                                elevation: 4,
+                                borderRadius: BorderRadius.circular(12),
+                                child: SizedBox(
+                                  height: 250,
+                                  child: ListView.separated(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 8),
+                                    itemCount: options.length,
+                                    separatorBuilder: (_, __) =>
+                                        const Divider(height: 1),
+                                    itemBuilder: (context, index) {
+                                      final option = options.elementAt(index);
+                                      return ListTile(
+                                        title: Text(option.name),
+                                        subtitle: Text(option.id),
+                                        onTap: () => onSelected(option),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        if (_projectsError != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(
+                              _projectsError!,
+                              style: AppTheme.bodySmall.copyWith(
+                                color: Colors.redAccent,
+                              ),
+                            ),
+                          ),
+                        if (!hasApiKey)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Enter your API key to fetch your project list automatically.',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton.icon(
                         onPressed: _isLoading ? null : _clearStoredCredentials,
                         icon: const Icon(Icons.delete_outline),
                         label: const Text('Clear API & AI tokens'),
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-
-                    // Fetch button
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        onPressed: hasCredentials && !_isLoading
-                            ? _fetchProjectYaml
-                            : null,
-                        icon: _isLoading
-                            ? SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white),
-                                ),
-                              )
-                            : const Icon(Icons.download, size: 18),
-                        label: Text(_isLoading ? 'Loading...' : 'Fetch YAML'),
-                        style: AppTheme.primaryButtonStyle.copyWith(
-                          minimumSize: MaterialStateProperty.all(
-                              Size(double.infinity, 48)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 32),
-
-                // Recent projects section
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.history,
-                          size: 18,
-                          color: AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Recent Projects',
-                          style: AppTheme.headingSmall.copyWith(fontSize: 16),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      height: 180, // Reduced height to prevent overflow
-                      decoration: BoxDecoration(
-                        color: AppTheme.backgroundColor,
-                        borderRadius: BorderRadius.circular(8),
-                        border:
-                            Border.all(color: AppTheme.dividerColor, width: 1),
-                      ),
-                      child: RecentProjectsWidget(
-                        onProjectSelected: _handleProjectSelected,
-                        showHeader: false,
                       ),
                     ),
                   ],
@@ -1375,7 +1537,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-
+  
   // Helper to export YAML to multiple files
   void _prepareFilesForExport() {
     if (_parsedYamlMap == null && _exportedFiles.isEmpty) return;
@@ -1619,7 +1781,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _rawFetchedYaml = null;
       _parsedYamlMap = null;
       _generatedYamlMessage =
-          "Enter Project ID and API Token, then click 'Fetch YAML'.";
+          'Add your FlutterFlow API key and pick a project to load its YAML.';
       _operationMessage = "";
       _exportedFiles.clear();
       _originalFiles.clear();

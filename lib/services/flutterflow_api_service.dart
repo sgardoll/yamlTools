@@ -4,6 +4,20 @@ import 'package:http/http.dart' as http;
 import 'package:archive/archive.dart';
 import 'yaml_file_utils.dart';
 
+class FlutterFlowProject {
+  final String id;
+  final String name;
+
+  const FlutterFlowProject({required this.id, required this.name});
+
+  factory FlutterFlowProject.fromJson(Map<String, dynamic> json) {
+    return FlutterFlowProject(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? 'Untitled Project',
+    );
+  }
+}
+
 class FlutterFlowApiService {
   static const String baseUrl = 'https://api.flutterflow.io/v2';
   static final Map<String, String> _fileKeyCache = {};
@@ -18,6 +32,75 @@ class FlutterFlowApiService {
     'customAction': 'customAction',
     'archive_custom_actions': 'customAction',
   };
+
+  /// Fetches all projects accessible to the authenticated user.
+  static Future<List<FlutterFlowProject>> fetchProjects({
+    required String apiToken,
+  }) async {
+    if (apiToken.isEmpty) {
+      throw ArgumentError('API token cannot be empty');
+    }
+
+    final uri = Uri.parse('$baseUrl/projects');
+    debugPrint('Fetching projects via: $uri');
+
+    http.Response? response;
+
+    try {
+      response = await http.get(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $apiToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
+    } catch (e) {
+      throw FlutterFlowApiException(
+        endpoint: '$baseUrl/projects',
+        message: 'Network error while fetching projects: $e',
+        isNetworkError: true,
+      );
+    }
+
+    if (response.statusCode != 200) {
+      throw buildApiException(
+        endpoint: '$baseUrl/projects',
+        response: response,
+        note: 'Failed to load projects for the current user.',
+      );
+    }
+
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    } catch (e) {
+      throw FlutterFlowApiException(
+        endpoint: '$baseUrl/projects',
+        response: response,
+        message: 'Invalid JSON response while loading projects: $e',
+      );
+    }
+
+    final List<dynamic> projectList;
+    if (decoded is List) {
+      projectList = decoded;
+    } else if (decoded is Map<String, dynamic> && decoded['projects'] is List) {
+      projectList = decoded['projects'] as List;
+    } else {
+      throw FlutterFlowApiException(
+        endpoint: '$baseUrl/projects',
+        response: response,
+        message: 'Unexpected projects response shape.',
+      );
+    }
+
+    return projectList
+        .whereType<Map<String, dynamic>>()
+        .map((json) => FlutterFlowProject.fromJson(json))
+        .where((project) => project.id.isNotEmpty)
+        .toList();
+  }
 
   /// A structured exception to preserve rich error details from the API
   /// so the UI can present actionable feedback (path, line/col, message).
