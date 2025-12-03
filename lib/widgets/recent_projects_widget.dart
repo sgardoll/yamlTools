@@ -46,12 +46,12 @@ class _RecentProjectsWidgetState extends State<RecentProjectsWidget> {
     });
 
     final projects = await PreferencesManager.getRecentProjects();
-    final projects = await PreferencesManager.getRecentProjects();
     final sortedProjects = List<Map<String, dynamic>>.from(projects);
-    sortedProjects.sort((a, b) => (b['timestamp'] ?? 0).compareTo(a['timestamp'] ?? 0));
+    sortedProjects
+        .sort((a, b) => (b['timestamp'] ?? 0).compareTo(a['timestamp'] ?? 0));
 
     setState(() {
-      _recentProjects = projects;
+      _recentProjects = sortedProjects;
       _isLoading = false;
     });
   }
@@ -72,7 +72,9 @@ class _RecentProjectsWidgetState extends State<RecentProjectsWidget> {
       return name.contains(_searchQuery) || id.contains(_searchQuery);
     }).toList();
 
-    if (widget.maxItems != null && widget.maxItems! > 0 && _searchQuery.isEmpty) {
+    if (widget.maxItems != null &&
+        widget.maxItems! > 0 &&
+        _searchQuery.isEmpty) {
       return filtered.take(widget.maxItems!).toList();
     }
 
