@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:yaml/yaml.dart';
 import '../theme/app_theme.dart';
 import 'dart:collection';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 enum NodeType {
   root,
@@ -26,11 +27,21 @@ class TreeNode {
   final String? filePath;
   final List<TreeNode> children;
 
+  // New fields for enhanced visualization
+  final String? widgetType;
+  final bool hasBindings;
+  final bool isVisible;
+  final bool hasBackendQuery;
+
   TreeNode({
     required this.name,
     required this.type,
     this.filePath,
     List<TreeNode>? children,
+    this.widgetType,
+    this.hasBindings = false,
+    this.isVisible = true,
+    this.hasBackendQuery = false,
   }) : children = children ?? [];
 }
 
@@ -63,6 +74,10 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
   // Track previous count to auto-expand only when new unsaved files appear
   int _previousUnsavedCount = 0;
+
+  final TextEditingController _searchController = TextEditingController();
+  Map<String, String> _pageDisplayNames = {};
+  String _searchQuery = '';
 
   final TextEditingController _searchController = TextEditingController();
   Map<String, String> _pageDisplayNames = {};
@@ -208,8 +223,29 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   void _buildTree() {
     _rootNode = TreeNode(name: 'Root', type: NodeType.root);
 
-    // Also track display names to avoid duplicates in the tree
-    Set<String> processedDisplayNames = {};
+      final parts = cleanPath.split('/');
+      if (parts.length >= 3 &&
+          parts[0] == 'page' &&
+          parts[1].startsWith('id-Scaffold')) {
+        final folderName = parts[1];
+        final fileName = parts.last;
+        final simpleFileName = fileName.endsWith('.yaml')
+            ? fileName.substring(0, fileName.length - 5)
+            : fileName;
+
+        if (folderName == simpleFileName) {
+          try {
+            final yaml = loadYaml(content);
+            if (yaml is YamlMap && yaml['name'] != null) {
+              _pageDisplayNames[folderName] = yaml['name'].toString();
+            }
+          } catch (e) {
+            // ignore parse errors
+          }
+        }
+      }
+    });
+  }
 
     // Process all files from the yamlFiles map
     final List<String> filePaths = widget.yamlFiles.keys.toList()..sort();
@@ -258,7 +294,39 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     // Group files by path to create a tree structure
     final pathToNode = HashMap<String, TreeNode>();
 
-    // Root node is already created
+        return {
+          'isVisible': isVisible,
+          'hasBindings': hasBindings,
+          'hasBackendQuery': hasBackendQuery,
+          'customName': customName,
+        };
+      }
+    } catch (e) {
+      // ignore
+    }
+    return {};
+  }
+
+  bool _checkBindings(dynamic node) {
+    if (node is YamlMap) {
+      if (node.containsKey('inputValue')) return true;
+      for (var key in node.keys) {
+        if (_checkBindings(node[key])) return true;
+      }
+    } else if (node is YamlList) {
+      for (var item in node) {
+        if (_checkBindings(item)) return true;
+      }
+    }
+    return false;
+  }
+
+  void _buildTree() {
+    _rootNode = TreeNode(name: 'Root', type: NodeType.root);
+    _processedFiles = {};
+
+    final List<String> filePaths = widget.yamlFiles.keys.toList()..sort();
+    final pathToNode = HashMap<String, TreeNode>();
     pathToNode[''] = _rootNode;
 
     // Helper to check if a node matches search query
@@ -377,8 +445,21 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     return selfMatches || hasMatchingChildren;
   }
 
+  bool _filterTree(TreeNode node) {
+    if (node.children.isEmpty) {
+      return node.name.toLowerCase().contains(_searchQuery);
+    }
+    node.children.removeWhere((child) => !_filterTree(child));
+    bool selfMatches = node.name.toLowerCase().contains(_searchQuery);
+    bool hasMatchingChildren = node.children.isNotEmpty;
+    if (hasMatchingChildren) {
+      String nodeIdentifier = '${node.type}_${node.name}';
+      _expandedNodes.add(nodeIdentifier);
+    }
+    return selfMatches || hasMatchingChildren;
+  }
+
   NodeType _determineNodeType(String pathPart, bool isLeaf) {
-    // Determine node type based on path part naming patterns
     if (pathPart.startsWith('id-') && isLeaf) {
       return NodeType.leaf;
     } else if (pathPart.endsWith('.yaml')) {
@@ -407,9 +488,7 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   }
 
   void _sortNodes(TreeNode node) {
-    // Sort children by type and then by name
     node.children.sort((a, b) {
-      // First by type
       if (a.type != b.type) {
         // Unsaved Section comes first
         if (a.type == NodeType.unsavedSection) return -1;
@@ -418,21 +497,13 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
         // Collections come next
         if (a.type == NodeType.collection) return -1;
         if (b.type == NodeType.collection) return 1;
-
-        // Components come next
         if (a.type == NodeType.component) return -1;
         if (b.type == NodeType.component) return 1;
-
-        // Files come last
         if (a.type == NodeType.file) return 1;
         if (b.type == NodeType.file) return -1;
       }
-
-      // Then by name
       return a.name.compareTo(b.name);
     });
-
-    // Recursively sort children
     for (var child in node.children) {
       _sortNodes(child);
     }
@@ -517,7 +588,6 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
               ],
             ),
           ),
-          // Tree content
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -531,20 +601,16 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
   List<Widget> _buildNodeChildren(TreeNode node, int depth) {
     List<Widget> widgets = [];
-
-    // Skip the root node itself, but show its children
     if (node.type != NodeType.root) {
       widgets.add(_buildNodeWidget(node, depth));
     }
 
-    // Add children if this node is expanded
     String nodeIdentifier = '${node.type}_${node.name}';
     if (_expandedNodes.contains(nodeIdentifier) || node.type == NodeType.root) {
       for (var child in node.children) {
         widgets.addAll(_buildNodeChildren(child, depth + 1));
       }
     }
-
     return widgets;
   }
 
@@ -554,122 +620,141 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     bool isSelected = node.filePath == _selectedFilePath;
     bool hasChildren = node.children.isNotEmpty;
 
-    // Check if this file has been validated recently
-    bool isValidated = node.filePath != null &&
-        widget.validationTimestamps != null &&
-        widget.validationTimestamps!.containsKey(node.filePath!);
+    IconData icon = _getNodeIcon(node);
+    Color iconColor = _getNodeColor(node);
+    Color textColor = _getTextColor(node);
 
-    // Check if this file was recently synced (updated on FlutterFlow)
-    bool isSynced = node.filePath != null &&
-        widget.syncTimestamps != null &&
-        widget.syncTimestamps!.containsKey(node.filePath!);
-
-    // Check if this file has local edits that are not synced yet
-    bool isEditedNotSynced = false;
-    if (node.filePath != null && widget.updateTimestamps != null) {
-      final updatedAt = widget.updateTimestamps![node.filePath!];
-      if (updatedAt != null) {
-        final syncedAt = widget.syncTimestamps != null
-            ? widget.syncTimestamps![node.filePath!]
-            : null;
-        // Consider dirty when there's no sync, or last local update is newer than last sync
-        isEditedNotSynced = syncedAt == null || updatedAt.isAfter(syncedAt);
-      }
-    }
-
-    // Check if this is an AI-generated file
-    bool isAIGenerated = node.filePath?.startsWith('ai_generated_') ?? false;
-
-    // Get the icon based on node type
-    IconData icon = _getNodeIcon(node.type);
-    Color iconColor = _getNodeColor(node.type);
-
-    // Special styling for AI-generated files
-    if (isAIGenerated) {
-      iconColor = Color(0xFFEC4899); // Pink color for AI files
-      icon = Icons.auto_awesome; // AI icon
-    }
-
+    // Indentation and Lines
+    // We create a Stack for the lines
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          if (hasChildren) {
-            setState(() {
-              if (isExpanded) {
-                _expandedNodes.remove(nodeIdentifier);
-              } else {
-                _expandedNodes.add(nodeIdentifier);
-              }
-            });
-          }
-
-          // Always call file selection for leaf nodes or when clicking on files
-          if (node.filePath != null) {
-            widget.onFileSelected?.call(node.filePath!);
-          }
+            // If leaf, select it
+            if (node.filePath != null) {
+                widget.onFileSelected?.call(node.filePath!);
+            }
+            // Also toggle expansion if it has children
+            if (hasChildren) {
+                setState(() {
+                    if (isExpanded) {
+                        _expandedNodes.remove(nodeIdentifier);
+                    } else {
+                        _expandedNodes.add(nodeIdentifier);
+                    }
+                });
+            }
         },
-        borderRadius: BorderRadius.circular(4),
         child: Container(
-          padding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+          height: 32, // Fixed height for consistent lines
           decoration: BoxDecoration(
             color: isSelected
                 ? AppTheme.primaryColor.withOpacity(0.1)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
-            border: isSelected
+             border: isSelected
                 ? Border.all(color: AppTheme.primaryColor.withOpacity(0.3))
                 : null,
           ),
-          child: Row(
+          child: Stack(
             children: [
-              // Indentation
-              SizedBox(width: depth * 16.0),
-
-              // Expand/collapse indicator for folders
-              if (hasChildren)
-                Icon(
-                  isExpanded
-                      ? Icons.keyboard_arrow_down
-                      : Icons.keyboard_arrow_right,
-                  size: 16,
-                  color: AppTheme.textSecondary,
-                )
-              else
-                SizedBox(width: 16),
-
-              const SizedBox(width: 4),
-
-              // File/folder icon
-              Icon(
-                icon,
-                size: 16,
-                color: iconColor,
-              ),
-
-              const SizedBox(width: 8),
-
-              // File/folder name
-              Expanded(
-                child: Text(
-                  node.name,
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: isSelected
-                        ? AppTheme.primaryColor
-                        : AppTheme.textPrimary,
-                    fontWeight:
-                        isSelected ? FontWeight.w600 : FontWeight.normal,
+              // Vertical Guide Lines
+              ...List.generate(depth, (index) {
+                return Positioned(
+                  left: index * 20.0 + 10, // Center of the 20px indent
+                  top: 0,
+                  bottom: 0,
+                  width: 1,
+                  child: Container(
+                    color: Colors.grey.withOpacity(0.2),
                   ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
+                );
+              }),
 
-              // Status indicators
-              ..._buildStatusIndicators(
-                isSynced: isSynced,
-                isAIGenerated: isAIGenerated,
-                isValidated: isValidated,
-                isEditedNotSynced: isEditedNotSynced,
+              // Content
+              Padding(
+                padding: EdgeInsets.only(left: depth * 20.0 + 10), // Indent content
+                child: Row(
+                  children: [
+                    // Node Icon
+                    SizedBox(width: 24, child: Center(child: Icon(icon, size: 14, color: iconColor))),
+                    const SizedBox(width: 8),
+
+                    // Name
+                    Expanded(
+                      child: Text(
+                        node.name,
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: textColor,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                          fontSize: 13,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+
+                    // Status Icons (Link, Eye, Database)
+                    if (node.hasBindings) ...[
+                      const SizedBox(width: 4),
+                      Icon(Icons.link, size: 12, color: Colors.tealAccent), // Link
+                    ],
+                    if (node.hasBackendQuery) ...[
+                      const SizedBox(width: 4),
+                      Icon(FontAwesomeIcons.coins, size: 10, color: Colors.amber), // Database/Coin
+                    ],
+                    // Visibility: If detected or explicitly false
+                    if (!node.isVisible) ...[
+                       const SizedBox(width: 4),
+                       Icon(FontAwesomeIcons.eyeSlash, size: 10, color: Colors.grey),
+                    ] else if (node.hasBindings && node.isVisible) ...[
+                       // Only show eye if bound? Or just if present? Design shows Eye on 'If'.
+                       // I'll show eye if specifically flagged
+                       const SizedBox(width: 4),
+                       Icon(FontAwesomeIcons.eye, size: 10, color: Colors.grey),
+                    ],
+
+                    const SizedBox(width: 8),
+
+                    // Hover Actions (Add, Expand) - Always show for now
+                    // Add Button
+                    if (hasChildren || node.type == NodeType.layout || node.widgetType == 'Column')
+                      InkWell(
+                        onTap: () {
+                           // Placeholder for Add Widget
+                           ScaffoldMessenger.of(context).showSnackBar(
+                             SnackBar(content: Text('Add Widget to ${node.name} not implemented')),
+                           );
+                        },
+                        child: Icon(Icons.add_box_outlined, size: 14, color: Colors.grey),
+                      ),
+
+                    const SizedBox(width: 8),
+
+                    // Expand Arrow (Right aligned)
+                    if (hasChildren)
+                      InkWell(
+                        onTap: () {
+                           setState(() {
+                              if (isExpanded) {
+                                  _expandedNodes.remove(nodeIdentifier);
+                              } else {
+                                  _expandedNodes.add(nodeIdentifier);
+                              }
+                           });
+                        },
+                        child: Icon(
+                          isExpanded
+                              ? Icons.keyboard_arrow_down
+                              : Icons.keyboard_arrow_right,
+                          size: 16,
+                          color: AppTheme.textSecondary,
+                        ),
+                      )
+                    else
+                      SizedBox(width: 16),
+
+                     const SizedBox(width: 8),
+                  ],
+                ),
               ),
             ],
           ),
@@ -678,101 +763,33 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     );
   }
 
-  List<Widget> _buildStatusIndicators({
-    required bool isSynced,
-    required bool isAIGenerated,
-    required bool isValidated,
-    required bool isEditedNotSynced,
-  }) {
-    final List<Widget> indicators = [];
-
-    if (isSynced) {
-      indicators.add(
-        Container(
-          margin: const EdgeInsets.only(left: 4),
-          width: 16,
-          height: 16,
-          decoration: const BoxDecoration(
-            color: AppTheme.successColor,
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.check,
-            size: 10,
-            color: Colors.white,
-          ),
-        ),
-      );
+  IconData _getNodeIcon(TreeNode node) {
+    if (node.widgetType != null) {
+      switch (node.widgetType) {
+        case 'Page': return Icons.phone_android;
+        case 'Column': return FontAwesomeIcons.tableColumns; // Vertical layout
+        case 'Row': return FontAwesomeIcons.tableCells; // Horizontal layout
+        case 'Stack': return Icons.layers;
+        case 'Text': return Icons.text_fields;
+        case 'Image': return Icons.image;
+        case 'Button': return FontAwesomeIcons.gem; // Diamond as requested
+        case 'Container': return Icons.check_box_outline_blank;
+        case 'If': return FontAwesomeIcons.codeBranch;
+        case 'Else': return FontAwesomeIcons.codeBranch;
+        case 'ListView': return Icons.list;
+        case 'TextField': return Icons.input;
+      }
     }
 
-    if (isAIGenerated) {
-      indicators.add(
-        Container(
-          margin: const EdgeInsets.only(left: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          decoration: BoxDecoration(
-            color: const Color(0xFFEC4899).withOpacity(0.2),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: const Color(0xFFEC4899), width: 1),
-          ),
-          child: const Text(
-            'AI',
-            style: TextStyle(
-              fontSize: 8,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFFEC4899),
-            ),
-          ),
-        ),
-      );
-    } else if (isEditedNotSynced) {
-      // Show an explicit "Unsaved" badge when there are local edits not yet synced
-      indicators.add(
-        Container(
-          margin: const EdgeInsets.only(left: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: Colors.orange, width: 1),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              Icon(Icons.pending_actions, size: 10, color: Colors.orange),
-              SizedBox(width: 3),
-              Text(
-                'Unsaved',
-                style: TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.orange,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    } else if (isValidated) {
-      indicators.add(
-        Container(
-          margin: const EdgeInsets.only(left: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          decoration: BoxDecoration(
-            color: AppTheme.validColor.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: AppTheme.validColor, width: 1),
-          ),
-          child: Icon(
-            Icons.verified,
-            size: 10,
-            color: AppTheme.validColor,
-          ),
-        ),
-      );
+    // Fallback to type
+    switch (node.type) {
+      case NodeType.collection: return Icons.folder;
+      case NodeType.component: return FontAwesomeIcons.gem;
+      case NodeType.button: return FontAwesomeIcons.gem;
+      case NodeType.trigger: return Icons.electric_bolt;
+      case NodeType.action: return Icons.flash_on;
+      default: return Icons.insert_drive_file;
     }
-
-    return indicators;
   }
 
   IconData _getNodeIcon(NodeType type) {
@@ -806,6 +823,11 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
       default:
         return Icons.folder;
     }
+    if (node.widgetType == 'Page') return Colors.grey;
+    if (node.type == NodeType.action) return Colors.pinkAccent;
+    if (node.type == NodeType.trigger) return Colors.yellow;
+
+    return Colors.grey; // Structural elements are grey
   }
 
   Color _getNodeColor(NodeType type) {
@@ -831,5 +853,6 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
       default:
         return AppTheme.textPrimary;
     }
+    return AppTheme.textPrimary;
   }
 }
