@@ -488,14 +488,13 @@ class FlutterFlowApiService {
     required String fileKey,
     required String content,
   }) async {
+    // Probe using the same zip-based payload we use for real validation/updates
+    // to avoid false positives from the legacy fileKey/fileContent shape.
     final uri = Uri.parse('$baseUrl/validateProjectYaml');
-    final payload = {
-      'projectId': projectId,
-      'fileKey': fileKey,
-      'fileContent': content,
-    };
+    final yamlContent = _createProjectZip({fileKey: content});
+    final payload = jsonEncode({'projectId': projectId, 'yamlContent': yamlContent});
 
-    debugPrint('Validation probe payload for "$fileKey": ${jsonEncode(payload)}');
+    debugPrint('Validation probe payload for "$fileKey": $payload');
 
     try {
       final response = await http.post(
@@ -505,13 +504,13 @@ class FlutterFlowApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: jsonEncode(payload),
+        body: payload,
       );
 
       debugPrint(
           'Validation probe response (${response.statusCode}) for "$fileKey": ${response.body}');
 
-      // 200 = accepted, 400 = format accepted but content invalid.
+      // 200 = accepted (success true/false), 400 = format accepted but content invalid.
       return response.statusCode == 200 || response.statusCode == 400;
     } catch (e) {
       debugPrint('Validation probe threw for "$fileKey": $e');
