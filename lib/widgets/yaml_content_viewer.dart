@@ -329,11 +329,42 @@ class _YamlContentViewerState extends State<YamlContentViewer> {
       attemptedFileKey = fileKey;
       debugPrint('Updating file via API: $effectiveFilePath -> key: "$fileKey"');
 
-      // Call the FlutterFlow API with the resolved file key
+      // Upload with both the resolved key and the canonical on-disk path to
+      // avoid silently writing to an alias that FlutterFlow ignores (some
+      // nested node files only persist when sent with the on-disk path).
+      final uploadKeys = <String>{};
+      uploadKeys.add(fileKey);
+      final canonicalPath =
+          YamlFileUtils.normalizeFilePath(effectiveFilePath).canonicalPath;
+      uploadKeys.add(canonicalPath);
+      uploadKeys.addAll(
+        FlutterFlowApiService.buildFileKeyCandidates(
+          filePath: effectiveFilePath,
+          yamlContent: content,
+        ),
+      );
+
+      // Deduplicate by the actual zip entry name to avoid double-adding the same file
+      final seenEntryNames = <String>{};
+      final payload = <String, String>{};
+      for (final key in uploadKeys) {
+        final normalized = key.trim();
+        if (normalized.isEmpty) continue;
+        String entryName = normalized;
+        if (!entryName.toLowerCase().endsWith('.yaml') &&
+            !entryName.toLowerCase().endsWith('.yml')) {
+          entryName = '$entryName.yaml';
+        }
+        if (seenEntryNames.add(entryName)) {
+          payload[normalized] = content;
+        }
+      }
+
+      // Call the FlutterFlow API with the resolved file key(s)
       await FlutterFlowApiService.updateProjectYaml(
         projectId: widget.projectId,
         apiToken: apiToken,
-        fileKeyToContent: {fileKey: content},
+        fileKeyToContent: payload,
       );
 
       // Success, record the key
