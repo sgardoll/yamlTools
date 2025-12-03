@@ -5,6 +5,7 @@ import 'dart:collection';
 
 enum NodeType {
   root,
+  unsavedSection,
   folder,
   collection,
   component,
@@ -59,8 +60,9 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   late TreeNode _rootNode;
   Set<String> _expandedNodes = {};
   String? _selectedFilePath;
-  // Track processed file paths to avoid duplicates
-  Set<String> _processedFiles = {};
+
+  // Track previous count to auto-expand only when new unsaved files appear
+  int _previousUnsavedCount = 0;
 
   final TextEditingController _searchController = TextEditingController();
   Map<String, String> _pageDisplayNames = {};
@@ -91,10 +93,23 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
   @override
   void didUpdateWidget(ModernYamlTree oldWidget) {
     super.didUpdateWidget(oldWidget);
+    bool shouldRebuild = false;
+
     if (oldWidget.yamlFiles != widget.yamlFiles) {
       _extractPageNames();
+      shouldRebuild = true;
+    }
+
+    // Also rebuild if timestamps change, as this affects the unsaved section
+    if (oldWidget.updateTimestamps != widget.updateTimestamps ||
+        oldWidget.syncTimestamps != widget.syncTimestamps) {
+      shouldRebuild = true;
+    }
+
+    if (shouldRebuild) {
       _buildTree();
     }
+
     if (oldWidget.expandedNodes != widget.expandedNodes) {
       if (widget.expandedNodes != null) {
         _expandedNodes = Set.from(widget.expandedNodes!);
@@ -176,9 +191,22 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     return rawName;
   }
 
+  bool _isUnsaved(String filePath) {
+    if (widget.updateTimestamps == null) return false;
+
+    final updatedAt = widget.updateTimestamps![filePath];
+    if (updatedAt == null) return false;
+
+    final syncedAt = widget.syncTimestamps != null
+        ? widget.syncTimestamps![filePath]
+        : null;
+
+    // Consider dirty when there's no sync, or last local update is newer than last sync
+    return syncedAt == null || updatedAt.isAfter(syncedAt);
+  }
+
   void _buildTree() {
     _rootNode = TreeNode(name: 'Root', type: NodeType.root);
-    _processedFiles = {}; // Reset processed files
 
     // Also track display names to avoid duplicates in the tree
     Set<String> processedDisplayNames = {};
@@ -186,6 +214,47 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     // Process all files from the yamlFiles map
     final List<String> filePaths = widget.yamlFiles.keys.toList()..sort();
 
+    // 1. Build Unsaved Section
+    List<TreeNode> unsavedNodes = [];
+    for (String filePath in filePaths) {
+      // Skip system files
+      if (filePath.contains('complete_raw.yaml') ||
+          filePath.contains('raw_project.yaml')) {
+        continue;
+      }
+
+      if (_isUnsaved(filePath)) {
+        String filename = filePath.split('/').last;
+        NodeType type = _determineNodeType(filename, true);
+        String friendlyName = _getFriendlyName(filename, filePath, type);
+
+        unsavedNodes.add(TreeNode(
+          name: friendlyName,
+          type: type,
+          filePath: filePath,
+        ));
+      }
+    }
+
+    if (unsavedNodes.isNotEmpty) {
+      // Create unsaved section node
+      final unsavedSection = TreeNode(
+        name: 'Unsaved Files',
+        type: NodeType.unsavedSection,
+        children: unsavedNodes,
+      );
+
+      _rootNode.children.add(unsavedSection);
+
+      // Auto-expand if first time appearing
+      if (_previousUnsavedCount == 0) {
+        _expandedNodes.add('${NodeType.unsavedSection}_Unsaved Files');
+      }
+    }
+
+    _previousUnsavedCount = unsavedNodes.length;
+
+    // 2. Build Regular Tree
     // Group files by path to create a tree structure
     final pathToNode = HashMap<String, TreeNode>();
 
@@ -199,15 +268,6 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
     // Track matching nodes to ensure parents are kept
     Set<TreeNode> matchingNodes = {};
-
-    // Temporary storage for built nodes to apply search filtering later
-    // Actually, it's easier to build the full tree and then prune or just
-    // only add nodes that match (and their ancestors).
-    // Let's modify the build process to build full structure but with friendly names,
-    // and then we can maybe filter visualization or just filter during build.
-
-    // Given the structure, we need to handle "skipping" nodes (like 'node' folder).
-    // This is easier if we process path parts carefully.
 
     for (String filePath in filePaths) {
       // Skip system files
@@ -351,7 +411,11 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
     node.children.sort((a, b) {
       // First by type
       if (a.type != b.type) {
-        // Collections come first
+        // Unsaved Section comes first
+        if (a.type == NodeType.unsavedSection) return -1;
+        if (b.type == NodeType.unsavedSection) return 1;
+
+        // Collections come next
         if (a.type == NodeType.collection) return -1;
         if (b.type == NodeType.collection) return 1;
 
@@ -713,6 +777,8 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
   IconData _getNodeIcon(NodeType type) {
     switch (type) {
+      case NodeType.unsavedSection:
+        return Icons.pending_actions;
       case NodeType.collection:
         return Icons.folder;
       case NodeType.component:
@@ -744,6 +810,8 @@ class _ModernYamlTreeState extends State<ModernYamlTree> {
 
   Color _getNodeColor(NodeType type) {
     switch (type) {
+      case NodeType.unsavedSection:
+        return Colors.orange;
       case NodeType.collection:
         return Colors.amber;
       case NodeType.component:
