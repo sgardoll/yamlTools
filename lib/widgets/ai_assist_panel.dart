@@ -419,93 +419,107 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
   }
 
   Widget _buildInputState() {
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Describe the changes you want to make:',
-            style: AppTheme.bodyMedium,
-          ),
-          SizedBox(height: 8),
-          Expanded(
-            child: TextField(
-              controller: _promptController,
-              decoration: InputDecoration(
-                hintText:
-                    'E.g., "Add a verified boolean field to the users collection" or "Change the primary color to red"',
-                border: OutlineInputBorder(),
-                alignLabelWithHint: true,
-              ),
-              maxLines: null,
-              expands: true,
-              textAlignVertical: TextAlignVertical.top,
-            ),
-          ),
-          SizedBox(height: 16),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final promptHeight = constraints.maxHeight.isFinite
+            ? constraints.maxHeight * 0.4
+            : 240.0;
+        final clampedPromptHeight =
+            promptHeight.clamp(200.0, 420.0); // keeps a tall, scrollable input
 
-          // Context Pinning
-          Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: _showContextPicker,
-                icon: Icon(Icons.playlist_add_check, size: 18),
-                label: Text('Context Files (${_pinnedFiles.length})'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _pinnedFiles.isNotEmpty
-                      ? Colors.blue[100]
-                      : Colors.grey[200],
-                  foregroundColor: Colors.black87,
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Describe the changes you want to make:',
+                  style: AppTheme.bodyMedium,
                 ),
-              ),
-              Spacer(),
-            ],
+                SizedBox(height: 8),
+                SizedBox(
+                  height: clampedPromptHeight,
+                  child: TextField(
+                    controller: _promptController,
+                    decoration: InputDecoration(
+                      hintText:
+                          'E.g., "Add a verified boolean field to the users collection" or "Change the primary color to red"',
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                    ),
+                    maxLines: null,
+                    expands: true,
+                    textAlignVertical: TextAlignVertical.top,
+                  ),
+                ),
+                SizedBox(height: 16),
+
+                // Context Pinning
+                Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: _showContextPicker,
+                      icon: Icon(Icons.playlist_add_check, size: 18),
+                      label: Text('Context Files (${_pinnedFiles.length})'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _pinnedFiles.isNotEmpty
+                            ? Colors.blue[100]
+                            : Colors.grey[200],
+                        foregroundColor: Colors.black87,
+                      ),
+                    ),
+                    Spacer(),
+                  ],
+                ),
+
+                if (_pinnedFiles.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: _pinnedFiles
+                          .map((f) => Chip(
+                                label: Text(f, style: TextStyle(fontSize: 10)),
+                                deleteIcon: Icon(Icons.close, size: 12),
+                                onDeleted: () {
+                                  setState(() {
+                                    _pinnedFiles.remove(f);
+                                  });
+                                },
+                                visualDensity: VisualDensity.compact,
+                              ))
+                          .toList(),
+                    ),
+                  ),
+
+                SizedBox(height: 16),
+
+                if (_errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16.0),
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(color: Colors.red),
+                    ),
+                  ),
+
+                SizedBox(
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: _handleSubmit,
+                    icon: Icon(Icons.auto_awesome),
+                    label: Text('Generate Changes'),
+                    style: AppTheme.primaryButtonStyle,
+                  ),
+                ),
+              ],
+            ),
           ),
-
-          if (_pinnedFiles.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0),
-              child: Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: _pinnedFiles
-                    .map((f) => Chip(
-                          label: Text(f, style: TextStyle(fontSize: 10)),
-                          deleteIcon: Icon(Icons.close, size: 12),
-                          onDeleted: () {
-                            setState(() {
-                              _pinnedFiles.remove(f);
-                            });
-                          },
-                          visualDensity: VisualDensity.compact,
-                        ))
-                    .toList(),
-              ),
-            ),
-
-          SizedBox(height: 16),
-
-          if (_errorMessage != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: Text(
-                _errorMessage!,
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
-
-          SizedBox(
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: _handleSubmit,
-              icon: Icon(Icons.auto_awesome),
-              label: Text('Generate Changes'),
-              style: AppTheme.primaryButtonStyle,
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
