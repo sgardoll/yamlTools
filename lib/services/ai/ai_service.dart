@@ -6,6 +6,7 @@ import 'openai_client.dart';
 
 // Updated System Prompt for strict FlutterFlow compliance
 class AIService {
+  static const String _codexModel = 'codex-5.1-max';
   final String apiKey;
   final OpenAIClient _client;
 
@@ -36,15 +37,17 @@ class AIService {
 
     try {
       // 3. Call OpenAI
-      final response = await _client.chat(
-        model: "gpt-4o",
-        messages: messages,
+      final response = await _client.respond(
+        model: _codexModel,
+        input: _convertMessagesToResponseInput(messages),
         temperature: 0.1, // Low temperature for deterministic code generation
-        maxTokens: 4000,
-        responseFormat: {"type": "json_object"},
+        maxOutputTokens: 4000,
+        textConfig: {
+          'format': {'type': 'json_object'},
+        },
       );
 
-      final content = response['choices'][0]['message']['content'] as String;
+      final content = _extractContentFromResponse(response);
 
       // 4. Parse Response
       return _parseResponse(content, request.projectFiles);
@@ -390,6 +393,63 @@ You must return a JSON object with the following structure:
 - If validation fails, report it in the summary.
 - Do not apply partial changes that break the project.
 ''';
+  }
+
+  List<Map<String, dynamic>> _convertMessagesToResponseInput(
+      List<Map<String, String>> messages) {
+    return messages
+        .map(
+          (message) => {
+            'role': message['role'],
+            'content': [
+              {
+                'type': 'input_text',
+                'text': message['content'] ?? '',
+              }
+            ],
+          },
+        )
+        .toList();
+  }
+
+  String _extractContentFromResponse(Map<String, dynamic> response) {
+    final output = response['output'];
+    if (output is List && output.isNotEmpty) {
+      final firstOutput = output.first;
+      if (firstOutput is Map<String, dynamic>) {
+        final content = firstOutput['content'];
+        if (content is List && content.isNotEmpty) {
+          final firstContent = content.first;
+          if (firstContent is Map && firstContent['text'] is String) {
+            return firstContent['text'] as String;
+          }
+          if (firstContent is String) {
+            return firstContent;
+          }
+        } else if (content is String) {
+          return content;
+        }
+      }
+    }
+
+    // Fallback for chat-style responses to keep backward compatibility
+    final choices = response['choices'];
+    if (choices is List && choices.isNotEmpty) {
+      final firstChoice = choices.first;
+      if (firstChoice is Map) {
+        final message = firstChoice['message'];
+        if (message is Map && message['content'] is String) {
+          return message['content'] as String;
+        }
+      }
+    }
+
+    final outputText = response['output_text'];
+    if (outputText is String && outputText.isNotEmpty) {
+      return outputText;
+    }
+
+    throw Exception('Unable to parse AI response content');
   }
 
   String _extractProjectMetadata(Map<String, String> projectFiles) {
