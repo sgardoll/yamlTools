@@ -12,22 +12,24 @@ class _FakeOpenAIClient extends OpenAIClient {
   _FakeOpenAIClient(this.fakeResponse) : super(apiKey: 'test-key');
 
   final Map<String, dynamic> fakeResponse;
-  List<Map<String, String>>? lastMessages;
+  List<Map<String, dynamic>>? lastInput;
   String? lastModel;
-  Map<String, dynamic>? lastResponseFormat;
+  int? lastMaxOutputTokens;
+  Map<String, dynamic>? lastTextConfig;
 
   @override
-  Future<Map<String, dynamic>> chat({
+  Future<Map<String, dynamic>> respond({
     required String model,
-    required List<Map<String, String>> messages,
+    required List<Map<String, dynamic>> input,
     double? temperature,
-    int? maxTokens,
+    int? maxOutputTokens,
     List<Map<String, dynamic>>? tools,
-    Map<String, dynamic>? responseFormat,
+    Map<String, dynamic>? textConfig,
   }) async {
     lastModel = model;
-    lastMessages = messages;
-    lastResponseFormat = responseFormat;
+    lastInput = input;
+    lastTextConfig = textConfig;
+    lastMaxOutputTokens = maxOutputTokens;
     return fakeResponse;
   }
 }
@@ -182,20 +184,24 @@ component:
   group('AIService', () {
     test('returns proposed changes with original content for known files', () async {
       final fakeClient = _FakeOpenAIClient({
-        'choices': [
+        'output': [
           {
-            'message': {
-              'content': jsonEncode({
-                'summary': 'Update home page',
-                'modifications': [
-                  {
-                    'filePath': 'pages/home.yaml',
-                    'newContent': 'updated content',
-                    'touchedPaths': ['widgets'],
-                  }
-                ],
-              }),
-            },
+            'role': 'assistant',
+            'content': [
+              {
+                'type': 'text',
+                'text': jsonEncode({
+                  'summary': 'Update home page',
+                  'modifications': [
+                    {
+                      'filePath': 'pages/home.yaml',
+                      'newContent': 'updated content',
+                      'touchedPaths': ['widgets'],
+                    }
+                  ],
+                }),
+              }
+            ],
           },
         ],
       });
@@ -212,9 +218,15 @@ component:
         ),
       );
 
-      expect(fakeClient.lastModel, 'gpt-4o');
-      expect(fakeClient.lastResponseFormat, {'type': 'json_object'});
-      expect(fakeClient.lastMessages?.last['content'], contains('pages/home.yaml'));
+      expect(fakeClient.lastModel, 'gpt-5.1');
+      expect(fakeClient.lastTextConfig, {
+        'format': {'type': 'json_object'}
+      });
+      expect(
+        fakeClient.lastInput?.last['content']?.first['text'],
+        contains('pages/home.yaml'),
+      );
+      expect(fakeClient.lastMaxOutputTokens, 8192);
 
       final mod = result.modifications.single;
       expect(mod.originalContent, 'original content');
@@ -222,21 +234,137 @@ component:
       expect(mod.touchedPaths, contains('widgets'));
     });
 
+    test('parses response when reasoning output precedes message output', () async {
+      final fakeClient = _FakeOpenAIClient({
+        'output': [
+          {
+            'id': 'rs_reasoning',
+            'type': 'reasoning',
+            'summary': [],
+          },
+          {
+            'id': 'msg_result',
+            'type': 'message',
+            'status': 'completed',
+            'content': [
+              {
+                'type': 'output_text',
+                'text': jsonEncode({
+                  'summary': 'Validation Report: Ambiguous request',
+                  'modifications': [],
+                }),
+              }
+            ],
+            'role': 'assistant',
+          },
+        ],
+      });
+
+      final service = AIService('test-key', client: fakeClient);
+      final result = await service.requestModification(
+        request: AIRequest(
+          userPrompt: 'Adjust padding everywhere',
+          pinnedFilePaths: [],
+          projectFiles: const {
+            'pages/home.yaml': 'original content',
+          },
+        ),
+      );
+
+      expect(result.summary, contains('Validation Report'));
+      expect(result.modifications, isEmpty);
+    });
+
+    test('throws when response is incomplete due to max_output_tokens', () async {
+      final fakeClient = _FakeOpenAIClient({
+        'status': 'incomplete',
+        'incomplete_details': {'reason': 'max_output_tokens'},
+        'output': [
+          {
+            'id': 'rs_reasoning',
+            'type': 'reasoning',
+            'summary': [],
+          },
+        ],
+      });
+
+      final service = AIService('test-key', client: fakeClient);
+
+      expect(
+        () => service.requestModification(
+          request: AIRequest(
+            userPrompt: 'Change padding globally',
+            pinnedFilePaths: const [],
+            projectFiles: const {
+              'pages/home.yaml': 'original content',
+            },
+          ),
+        ),
+        throwsA(predicate((e) => e.toString().contains('max_output_tokens'))),
+      );
+    });
+
+    test('includes all small files when none are pinned', () async {
+      final fakeClient = _FakeOpenAIClient({
+        'output': [
+          {
+            'id': 'msg_result',
+            'type': 'message',
+            'status': 'completed',
+            'content': [
+              {
+                'type': 'output_text',
+                'text': jsonEncode({
+                  'summary': 'OK',
+                  'modifications': [],
+                }),
+              }
+            ],
+            'role': 'assistant',
+          },
+        ],
+      });
+
+      final service = AIService('test-key', client: fakeClient);
+      await service.requestModification(
+        request: AIRequest(
+          userPrompt: 'general change',
+          pinnedFilePaths: const [],
+          projectFiles: const {
+            'pages/home.yaml': 'home content',
+            'theme/colors.yaml': 'color content',
+          },
+        ),
+      );
+
+      final userMessage =
+          fakeClient.lastInput?.last['content']?.first['text'] as String?;
+      expect(userMessage, isNotNull);
+      expect(userMessage, contains('File: pages/home.yaml'));
+      expect(userMessage, contains('home content'));
+      expect(userMessage, contains('File: theme/colors.yaml'));
+      expect(userMessage, contains('color content'));
+    });
+
     test('marks files missing from the project as new', () async {
       final fakeClient = _FakeOpenAIClient({
-        'choices': [
+        'output': [
           {
-            'message': {
-              'content': jsonEncode({
-                'summary': 'Add a new config file',
-                'modifications': [
-                  {
-                    'filePath': 'config/app.yaml',
-                    'newContent': 'name: demo',
-                  }
-                ],
-              }),
-            },
+            'role': 'assistant',
+            'content': [
+              {
+                'type': 'text',
+                'text': jsonEncode({
+                  'summary': 'Add a new config file',
+                  'modifications': [
+                    {
+                      'filePath': 'config/app.yaml',
+                      'newContent': 'name: demo',
+                    }
+                  ],
+                }),
+              }
+            ],
           },
         ],
       });

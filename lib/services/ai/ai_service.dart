@@ -6,7 +6,17 @@ import 'openai_client.dart';
 
 // Updated System Prompt for strict FlutterFlow compliance
 class AIService {
-  static const String _codexModel = 'codex-5.1-max';
+  static const String _defaultModel = 'gpt-5.1';
+  static const List<String> _modelFallbacks = [
+    _defaultModel,
+    'gpt-4.1',
+    'gpt-4o',
+  ];
+  static const Map<String, int> _modelMaxOutputTokens = {
+    'gpt-5.1': 8192,
+    'gpt-4.1': 4096,
+    'gpt-4o': 4096,
+  };
   final String apiKey;
   final OpenAIClient _client;
 
@@ -36,21 +46,11 @@ class AIService {
     ];
 
     try {
-      // 3. Call OpenAI
-      final response = await _client.respond(
-        model: _codexModel,
-        input: _convertMessagesToResponseInput(messages),
-        temperature: 0.1, // Low temperature for deterministic code generation
-        maxOutputTokens: 4000,
-        textConfig: {
-          'format': {'type': 'json_object'},
-        },
+      // 3. Call OpenAI with fallbacks in case the preferred model is unavailable
+      return await _callModelWithFallbacks(
+        messages,
+        request.projectFiles,
       );
-
-      final content = _extractContentFromResponse(response);
-
-      // 4. Parse Response
-      return _parseResponse(content, request.projectFiles);
     } catch (e) {
       debugPrint("AI Service Error: $e");
       rethrow;
@@ -59,6 +59,8 @@ class AIService {
 
   String _prepareContext(AIRequest request) {
     final buffer = StringBuffer();
+    final includedPaths = <String>{};
+    const maxContentLength = 10000;
 
     // Always add pinned files
     for (final path in request.pinnedFilePaths) {
@@ -68,6 +70,7 @@ class AIService {
         buffer.writeln(request.projectFiles[path]);
         buffer.writeln("```");
         buffer.writeln("");
+        includedPaths.add(path);
       }
     }
 
@@ -107,14 +110,32 @@ class AIService {
         isRelevant = true;
 
       // Add if relevant and small enough (simple token management)
-      if (isRelevant && content.length < 10000) {
+      if (isRelevant && content.length < maxContentLength) {
         buffer.writeln("File: $path");
         buffer.writeln("```yaml");
         buffer.writeln(content);
         buffer.writeln("```");
         buffer.writeln("");
+        includedPaths.add(path);
       }
     });
+
+    // If nothing pinned, include full content for remaining small files to allow the model
+    // to pull context directly without an extra round-trip.
+    if (request.pinnedFilePaths.isEmpty) {
+      request.projectFiles.forEach((path, content) {
+        if (includedPaths.contains(path)) return;
+        if (path == 'complete_raw.yaml' || path == 'raw_project.yaml') return;
+        if (content.length >= maxContentLength) return;
+
+        buffer.writeln("File: $path");
+        buffer.writeln("```yaml");
+        buffer.writeln(content);
+        buffer.writeln("```");
+        buffer.writeln("");
+        includedPaths.add(path);
+      });
+    }
 
     return buffer.toString();
   }
@@ -415,19 +436,30 @@ You must return a JSON object with the following structure:
   String _extractContentFromResponse(Map<String, dynamic> response) {
     final output = response['output'];
     if (output is List && output.isNotEmpty) {
-      final firstOutput = output.first;
-      if (firstOutput is Map<String, dynamic>) {
-        final content = firstOutput['content'];
-        if (content is List && content.isNotEmpty) {
-          final firstContent = content.first;
-          if (firstContent is Map && firstContent['text'] is String) {
-            return firstContent['text'] as String;
+      for (final item in output) {
+        if (item is Map<String, dynamic>) {
+          final content = item['content'];
+          if (content is List && content.isNotEmpty) {
+            for (final part in content) {
+              if (part is Map && part['text'] is String) {
+                final text = part['text'] as String;
+                if (text.isNotEmpty) return text;
+              }
+              if (part is String && part.isNotEmpty) {
+                return part;
+              }
+            }
+          } else if (content is String && content.isNotEmpty) {
+            return content;
           }
-          if (firstContent is String) {
-            return firstContent;
+
+          // Responses API often returns output items directly with type/text
+          final itemText = item['text'];
+          if (itemText is String && itemText.isNotEmpty) {
+            return itemText;
           }
-        } else if (content is String) {
-          return content;
+        } else if (item is String && item.isNotEmpty) {
+          return item;
         }
       }
     }
@@ -450,6 +482,56 @@ You must return a JSON object with the following structure:
     }
 
     throw Exception('Unable to parse AI response content');
+  }
+
+  void _ensureResponseComplete(Map<String, dynamic> response) {
+    final status = response['status']?.toString();
+    if (status != null && status != 'completed') {
+      final reason = response['incomplete_details']?['reason'];
+      final reasonText = reason != null ? reason.toString() : status;
+      throw Exception(
+        'AI response incomplete (${reasonText}). Try narrowing the request, pinning only relevant files, or retrying.',
+      );
+    }
+  }
+
+  int _maxOutputTokensForModel(String model) {
+    return _modelMaxOutputTokens[model] ??
+        _modelMaxOutputTokens[_defaultModel] ??
+        4096;
+  }
+
+  Future<ProposedChange> _callModelWithFallbacks(
+    List<Map<String, String>> messages,
+    Map<String, String> projectFiles,
+  ) async {
+    Exception? lastError;
+    for (final model in _modelFallbacks) {
+      try {
+        final response = await _client.respond(
+          model: model,
+          input: _convertMessagesToResponseInput(messages),
+          maxOutputTokens: _maxOutputTokensForModel(model),
+          textConfig: {
+            'format': {'type': 'json_object'},
+          },
+        );
+
+        _ensureResponseComplete(response);
+        final content = _extractContentFromResponse(response);
+        return _parseResponse(content, projectFiles);
+      } catch (e) {
+        final message = e.toString();
+        final isModelMissing =
+            message.contains('model_not_found') || message.contains('does not exist');
+        if (!isModelMissing) {
+          rethrow;
+        }
+        lastError = e is Exception ? e : Exception(message);
+        debugPrint('Model $model unavailable, trying fallback. Error: $message');
+      }
+    }
+    throw lastError ?? Exception('Unknown AI model error');
   }
 
   String _extractProjectMetadata(Map<String, String> projectFiles) {

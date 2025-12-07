@@ -51,4 +51,52 @@ class OpenAIClient {
           'Failed to get response: ${response.statusCode} ${utf8.decode(response.bodyBytes)}');
     }
   }
+
+  Future<Map<String, dynamic>> respond({
+    required String model,
+    required List<Map<String, dynamic>> input,
+    double? temperature,
+    int? maxOutputTokens,
+    List<Map<String, dynamic>>? tools,
+    Map<String, dynamic>? textConfig,
+  }) async {
+    final Uri url = Uri.parse('$baseUrl/responses');
+
+    final Map<String, dynamic> body = {
+      'model': model,
+      'input': input,
+    };
+
+    if (temperature != null) {
+      body['temperature'] = temperature;
+    }
+
+    if (maxOutputTokens != null) {
+      body['max_output_tokens'] = maxOutputTokens;
+    }
+
+    if (tools != null) {
+      body['tools'] = tools;
+    }
+
+    if (textConfig != null) {
+      body['text'] = textConfig;
+    }
+
+    final response = await http.post(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $apiKey',
+      },
+      body: jsonEncode(body),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception(
+          'Failed to get response: ${response.statusCode} ${utf8.decode(response.bodyBytes)}');
+    }
+  }
 }
