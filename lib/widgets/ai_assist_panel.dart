@@ -551,172 +551,190 @@ class _AIAssistPanelState extends State<AIAssistPanel> {
 
     return Column(
       children: [
-        // Summary Header
-        Container(
-          width: double.infinity,
-          padding: EdgeInsets.all(16),
-          color: Colors.blue[50],
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'AI Assist',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue[900],
+        Expanded(
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _buildReviewSummary(mods),
                 ),
+                if (mods.length > 1)
+                  SliverToBoxAdapter(
+                    child: _buildFileTabs(mods),
+                  ),
+                SliverFillRemaining(
+                  hasScrollBody: true,
+                  child: currentMod != null
+                      ? DiffViewWidget(
+                          originalContent: currentMod.originalContent,
+                          modifiedContent: currentMod.newContent,
+                          fileName: currentMod.filePath,
+                        )
+                      : Center(child: Text("No modifications")),
+                ),
+              ],
+            ),
+          ),
+        ),
+        _buildReviewActions(),
+      ],
+    );
+  }
+
+  Widget _buildReviewSummary(List<FileModification> mods) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(16),
+      color: Colors.blue[50],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'AI Assist',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.blue[900],
+            ),
+          ),
+          SizedBox(height: 4),
+          Text(
+            _currentProposal!.summary,
+            style: TextStyle(color: Colors.blue[800]),
+          ),
+          SizedBox(height: 8),
+          Row(
+            children: [
+              Checkbox(
+                value: _selectedModificationIndexes.length == mods.length &&
+                    mods.isNotEmpty,
+                onChanged: (checked) {
+                  setState(() {
+                    _selectedModificationIndexes.clear();
+                    if (checked == true) {
+                      _selectedModificationIndexes.addAll(
+                          List<int>.generate(mods.length, (i) => i));
+                    }
+                  });
+                },
               ),
-              SizedBox(height: 4),
               Text(
-                _currentProposal!.summary,
-                style: TextStyle(color: Colors.blue[800]),
+                'Apply ${_selectedModificationIndexes.length}/${mods.length} files',
+                style: TextStyle(color: Colors.blue[900]),
               ),
-              SizedBox(height: 8),
-              Row(
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileTabs(List<FileModification> mods) {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppTheme.dividerColor)),
+      ),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: mods.length,
+        itemBuilder: (context, index) {
+          final isSelected = index == _selectedModificationIndex;
+          final isChecked = _selectedModificationIndexes.contains(index);
+          return InkWell(
+            onTap: () => setState(() => _selectedModificationIndex = index),
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: isSelected
+                        ? AppTheme.primaryColor
+                        : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+                color: isSelected ? Colors.blue.withOpacity(0.05) : null,
+              ),
+              child: Row(
                 children: [
                   Checkbox(
-                    value: _selectedModificationIndexes.length == mods.length &&
-                        mods.isNotEmpty,
-                    onChanged: (checked) {
+                    value: isChecked,
+                    onChanged: (val) {
                       setState(() {
-                        _selectedModificationIndexes.clear();
-                        if (checked == true) {
-                          _selectedModificationIndexes.addAll(
-                              List<int>.generate(mods.length, (i) => i));
+                        if (val == true) {
+                          _selectedModificationIndexes.add(index);
+                        } else {
+                          _selectedModificationIndexes.remove(index);
                         }
                       });
                     },
                   ),
+                  SizedBox(width: 4),
                   Text(
-                    'Apply ${_selectedModificationIndexes.length}/${mods.length} files',
-                    style: TextStyle(color: Colors.blue[900]),
+                    mods[index].filePath,
+                    style: TextStyle(
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected
+                          ? AppTheme.primaryColor
+                          : Colors.black87,
+                    ),
                   ),
                 ],
               ),
-            ],
-          ),
-        ),
-
-        // File Tabs
-        if (mods.length > 1)
-          Container(
-            height: 40,
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppTheme.dividerColor)),
             ),
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: mods.length,
-              itemBuilder: (context, index) {
-                final isSelected = index == _selectedModificationIndex;
-                final isChecked = _selectedModificationIndexes.contains(index);
-                return InkWell(
-                  onTap: () =>
-                      setState(() => _selectedModificationIndex = index),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          color: isSelected
-                              ? AppTheme.primaryColor
-                              : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
-                      color: isSelected ? Colors.blue.withOpacity(0.05) : null,
-                    ),
-                    child: Row(
-                      children: [
-                        Checkbox(
-                          value: isChecked,
-                          onChanged: (val) {
-                            setState(() {
-                              if (val == true) {
-                                _selectedModificationIndexes.add(index);
-                              } else {
-                                _selectedModificationIndexes.remove(index);
-                              }
-                            });
-                          },
-                        ),
-                        SizedBox(width: 4),
-                        Text(
-                          mods[index].filePath,
-                          style: TextStyle(
-                            fontWeight: isSelected
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                            color: isSelected
-                                ? AppTheme.primaryColor
-                                : Colors.black87,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildReviewActions() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            offset: Offset(0, -2),
+            blurRadius: 4,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _handleDiscard,
+              child: Text('Discard'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: BorderSide(color: Colors.red.withOpacity(0.5)),
+              ),
             ),
           ),
-
-        // Diff View
-        Expanded(
-          child: currentMod != null
-              ? DiffViewWidget(
-                  originalContent: currentMod.originalContent,
-                  modifiedContent: currentMod.newContent,
-                  fileName: currentMod.filePath,
-                )
-              : Center(child: Text("No modifications")),
-        ),
-
-        // Actions
-        Container(
-          padding: EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                offset: Offset(0, -2),
-                blurRadius: 4,
+          SizedBox(width: 16),
+          Expanded(
+            child: ElevatedButton(
+              onPressed:
+                  _selectedModificationIndexes.isEmpty ? null : _handleMerge,
+              child: Text(
+                'Apply Selected as Local Edits',
+                textAlign: TextAlign.center,
               ),
-            ],
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _handleDiscard,
-                  child: Text('Discard'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: BorderSide(color: Colors.red.withOpacity(0.5)),
-                  ),
-                ),
-              ),
-              SizedBox(width: 16),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _selectedModificationIndexes.isEmpty
-                      ? null
-                      : _handleMerge,
-                  child: Text(
-                    'Apply Selected as Local Edits',
-                    textAlign: TextAlign.center,
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
