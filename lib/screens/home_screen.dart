@@ -13,6 +13,7 @@ import '../widgets/project_header.dart';
 import '../widgets/yaml_content_viewer.dart';
 import '../widgets/modern_yaml_tree.dart';
 import '../widgets/ai_assist_panel.dart'; // Import the new AI Assist panel
+import '../widgets/youtube_embed.dart';
 import '../services/ai/ai_models.dart'; // Import AI models
 import '../services/flutterflow_api_service.dart'; // Import FlutterFlow API service
 import '../services/yaml_file_utils.dart';
@@ -1350,259 +1351,324 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Container(
       color: AppTheme.backgroundColor,
-      child: Center(
-        child: SingleChildScrollView(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 600),
-            margin: const EdgeInsets.all(24),
-            padding: const EdgeInsets.all(32),
-            decoration: AppTheme.cardDecoration,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Header section
-                Column(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth > 1100;
+          final formCard =
+              _buildLoadProjectCard(hasApiKey, hasProjectOptions, canSearchProjects);
+          final videoCard = _buildIntroVideoCard();
+
+          final content = isWide
+              ? Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildHeroLogo(),
+                    Flexible(flex: 10, child: videoCard),
+                    const SizedBox(width: 24),
+                    Flexible(flex: 12, child: formCard),
+                  ],
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    videoCard,
                     const SizedBox(height: 16),
-                    Text(
-                      'Load FlutterFlow Project',
-                      style: AppTheme.headingLarge.copyWith(fontSize: 28),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Add your FlutterFlow API key to browse and load a project',
-                      style: AppTheme.bodyLarge.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
+                    formCard,
                   ],
+                );
+
+          return Center(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1280),
+                  child: content,
                 ),
-                const SizedBox(height: 32),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 
-                // Form section
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // API key field
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'FlutterFlow API Key',
-                          style: AppTheme.bodyMedium.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _apiTokenController,
-                          decoration: AppTheme.inputDecoration(
-                            hintText: 'Paste your FlutterFlow API key',
-                            prefixIcon: const Icon(Icons.vpn_key_outlined),
-                          ),
-                          style: AppTheme.bodyMedium,
-                          obscureText: true,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Projects dropdown
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              'Project',
-                              style: AppTheme.bodyMedium.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.textPrimary,
-                              ),
-                            ),
-                            if (_isFetchingProjects)
-                              Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                        AppTheme.primaryColor),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Autocomplete<FlutterFlowProject>(
-                          displayStringForOption: (option) =>
-                              '${option.name} (${option.id})',
-                          optionsBuilder: (textEditingValue) {
-                            if (!canSearchProjects) {
-                              return const Iterable<FlutterFlowProject>.empty();
-                            }
-
-                            final query =
-                                textEditingValue.text.toLowerCase().trim();
-                            if (query.isEmpty) {
-                              return _availableProjects;
-                            }
-
-                            return _availableProjects.where((project) {
-                              final searchable =
-                                  '${project.name} ${project.id}'.toLowerCase();
-                              return searchable.contains(query);
-                            });
-                          },
-                          onSelected: _handleProjectSelection,
-                          fieldViewBuilder: (context, textEditingController,
-                              focusNode, onEditingComplete) {
-                            _attachProjectSearchController(
-                              textEditingController,
-                            );
-
-                            return TextField(
-                              controller: _projectSearchController,
-                              focusNode: focusNode,
-                              onEditingComplete: onEditingComplete,
-                              decoration: AppTheme.inputDecoration(
-                                hintText: hasApiKey
-                                    ? (hasProjectOptions
-                                        ? 'Search your FlutterFlow projects'
-                                        : 'No projects found for this API key')
-                                    : 'Add API key to load projects',
-                                prefixIcon: const Icon(Icons.search),
-                              ),
-                              enabled: hasApiKey,
-                              style: AppTheme.bodyMedium,
-                            );
-                          },
-                          optionsViewBuilder: (context, onSelected, options) {
-                            return Align(
-                              alignment: Alignment.topLeft,
-                              child: Material(
-                                elevation: 4,
-                                borderRadius: BorderRadius.circular(12),
-                                child: SizedBox(
-                                  height: 250,
-                                  child: ListView.separated(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 8),
-                                    itemCount: options.length,
-                                    separatorBuilder: (_, __) =>
-                                        const Divider(height: 1),
-                                    itemBuilder: (context, index) {
-                                      final option = options.elementAt(index);
-                                      return ListTile(
-                                        title: Text(option.name),
-                                        subtitle: Text(option.id),
-                                        onTap: () => onSelected(option),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        if (_isLoading)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: AppTheme.panelDecoration,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    'Loading project... Hang tight.',
-                                    style: AppTheme.bodyMedium.copyWith(
-                                      color: AppTheme.textSecondary,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        if (_projectsError != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Text(
-                              _projectsError!,
-                              style: AppTheme.bodySmall.copyWith(
-                                color: Colors.redAccent,
-                              ),
-                            ),
-                          ),
-                        if (!hasApiKey)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              'Enter your API key to fetch your project list automatically.',
-                              style: AppTheme.bodySmall.copyWith(
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: _isLoading ? null : _clearStoredCredentials,
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('Clear API & AI tokens'),
-                      ),
-                    ),
-                    if (hasApiKey)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Recently updated projects',
-                              style: AppTheme.bodyMedium.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              decoration: AppTheme.panelDecoration,
-                              child: Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: RecentProjectsWidget(
-                                  onProjectSelected: _handleProjectSelected,
-                                  showHeader: false,
-                                  maxItems: 3,
-                                  enableSearch: false,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ],
+  Widget _buildIntroVideoCard() {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 520),
+      decoration: AppTheme.cardDecoration,
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Quick walkthrough',
+            style: AppTheme.headingMedium,
+          ),
+          const SizedBox(height: 12),
+          YouTubeEmbed(
+            videoUrl: 'https://www.youtube.com/watch?v=nGIfg-qYrwE',
+            borderRadius: BorderRadius.circular(12),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Watch how to connect your FlutterFlow API key, browse projects, and load YAML before validating updates.',
+            style: AppTheme.bodyMedium.copyWith(
+              color: AppTheme.textSecondary,
             ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadProjectCard(
+    bool hasApiKey,
+    bool hasProjectOptions,
+    bool canSearchProjects,
+  ) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 640),
+      padding: const EdgeInsets.all(32),
+      decoration: AppTheme.cardDecoration,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header section
+          Column(
+            children: [
+              _buildHeroLogo(),
+              const SizedBox(height: 16),
+              Text(
+                'Load FlutterFlow Project',
+                style: AppTheme.headingLarge.copyWith(fontSize: 28),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Add your FlutterFlow API key to browse and load a project',
+                style: AppTheme.bodyLarge.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+
+          // Form section
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // API key field
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'FlutterFlow API Key',
+                    style: AppTheme.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _apiTokenController,
+                    decoration: AppTheme.inputDecoration(
+                      hintText: 'Paste your FlutterFlow API key',
+                      prefixIcon: const Icon(Icons.vpn_key_outlined),
+                    ),
+                    style: AppTheme.bodyMedium,
+                    obscureText: true,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // Projects dropdown
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Project',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                      if (_isFetchingProjects)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Autocomplete<FlutterFlowProject>(
+                    displayStringForOption: (option) => '${option.name} (${option.id})',
+                    optionsBuilder: (textEditingValue) {
+                      if (!canSearchProjects) {
+                        return const Iterable<FlutterFlowProject>.empty();
+                      }
+
+                      final query = textEditingValue.text.toLowerCase().trim();
+                      if (query.isEmpty) {
+                        return _availableProjects;
+                      }
+
+                      return _availableProjects.where((project) {
+                        final searchable = '${project.name} ${project.id}'.toLowerCase();
+                        return searchable.contains(query);
+                      });
+                    },
+                    onSelected: _handleProjectSelection,
+                    fieldViewBuilder:
+                        (context, textEditingController, focusNode, onEditingComplete) {
+                      _attachProjectSearchController(
+                        textEditingController,
+                      );
+
+                      return TextField(
+                        controller: _projectSearchController,
+                        focusNode: focusNode,
+                        onEditingComplete: onEditingComplete,
+                        decoration: AppTheme.inputDecoration(
+                          hintText: hasApiKey
+                              ? (hasProjectOptions
+                                  ? 'Search your FlutterFlow projects'
+                                  : 'No projects found for this API key')
+                              : 'Add API key to load projects',
+                          prefixIcon: const Icon(Icons.search),
+                        ),
+                        enabled: hasApiKey,
+                        style: AppTheme.bodyMedium,
+                      );
+                    },
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(12),
+                          child: SizedBox(
+                            height: 250,
+                            child: ListView.separated(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              itemCount: options.length,
+                              separatorBuilder: (_, __) => const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final option = options.elementAt(index);
+                                return ListTile(
+                                  title: Text(option.name),
+                                  subtitle: Text(option.id),
+                                  onTap: () => onSelected(option),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  if (_isLoading)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: AppTheme.panelDecoration,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Loading project... Hang tight.',
+                              style: AppTheme.bodyMedium.copyWith(
+                                color: AppTheme.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_projectsError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        _projectsError!,
+                        style: AppTheme.bodySmall.copyWith(
+                          color: Colors.redAccent,
+                        ),
+                      ),
+                    ),
+                  if (!hasApiKey)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Enter your API key to fetch your project list automatically.',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _isLoading ? null : _clearStoredCredentials,
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Clear API & AI tokens'),
+                ),
+              ),
+              if (hasApiKey)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Recently updated projects',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: AppTheme.panelDecoration,
+                        child: Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: RecentProjectsWidget(
+                            onProjectSelected: _handleProjectSelected,
+                            showHeader: false,
+                            maxItems: 3,
+                            enableSearch: false,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
